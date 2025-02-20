@@ -1,0 +1,4 @@
+[submodule "template/automation-api-service"]
+	path = template/automation-api-service
+	url = https://github.com/ONDC-Official/automation-api-service.git
+	branch = module-template

@@ -1,0 +1,31 @@
+{
+	"name": "api-service-generator",
+	"version": "0.0.1",
+	"description": "generate api layer from build",
+	"main": "index.js",
+	"type": "module",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1",
+		"build": "tsc",
+		"start": "node dist/index.js",
+		"dev": "concurrently \"tsc --watch\" \"nodemon dist/index.js\""
+	},
+	"author": "extedcouD",
+	"license": "ISC",
+	"devDependencies": {
+		"@types/fs-extra": "^11.0.4",
+		"@types/js-yaml": "^4.0.9",
+		"@types/node": "^22.13.4",
+		"concurrently": "^9.1.2",
+		"nodemon": "^3.1.9",
+		"ts-node": "^10.9.2",
+		"typescript": "^5.7.3"
+	},
+	"dependencies": {
+		"@apidevtools/json-schema-ref-parser": "^11.9.1",
+		"dotenv": "^16.4.7",
+		"fs-extra": "^11.3.0",
+		"js-yaml": "^4.1.0",
+		"ondc-code-generator": "^0.1.0"
+	}
+}
