@@ -13,7 +13,7 @@ import { createEnvFile } from "./utils/env-file.js";
 import fs from "fs";
 dotenv.config();
 
-export const createApiServiceLayer = async (domain: string) => {
+export const createApiServiceLayer = async () => {
 	const buildString = readFileSync(
 		path.resolve(__dirname, "../src/config/build.yaml"),
 		"utf8"
@@ -27,6 +27,7 @@ export const createApiServiceLayer = async (domain: string) => {
 	await comp.generateL0Schema();
 
 	const version = buildParsed.info.version as string;
+	const domain = buildParsed.info.domain as string;
 	await createEnvFile(domain, version);
 	await moveRelevantFiles();
 };
@@ -96,5 +97,5 @@ const moveRelevantFiles = async () => {
 };
 
 (async () => {
-	await createApiServiceLayer("ONDC:TRV11");
+	await createApiServiceLayer();
 })();
