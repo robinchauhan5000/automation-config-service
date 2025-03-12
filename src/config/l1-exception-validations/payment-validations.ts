@@ -1,13 +1,37 @@
 /**
- * Payment Validations
+ * Payment Validations - EXAMPLE IMPLEMENTATION
  * 
- * Custom validations for payment-related rules across domains
+ * This file demonstrates how to implement custom L1 validations for payment-related rules.
+ * It is provided as a reference and should be modified to suit your specific business requirements.
+ * 
+ * IMPORTANT: This is an example implementation and not intended for direct use in production.
  */
 
-// Note: When you create a validation file, you would import the types 
-// from the generated code. Here we use 'any' for demonstration purposes.
+// Define validation types locally to avoid import issues
+type ValidationResult = {
+  valid: boolean;
+  code: number;
+  description?: string;
+};
 
-export function performL1CustomValidation(input: any): any {
+type ValidationInput = {
+  payload: Record<string, any>;
+  externalData?: Record<string, any>;
+  config?: {
+    runAllValidations?: boolean;
+  };
+};
+
+type ValidationOutput = ValidationResult[];
+
+/**
+ * EXAMPLE: Main validation function that will be executed during L1 validation phase
+ * This shows the pattern to follow when implementing your own custom validations
+ * 
+ * @param input The validation input object
+ * @returns Array of validation results
+ */
+export function performL1CustomValidation(input: ValidationInput): ValidationOutput {
   // Extract payload, context, domain and action
   const { payload } = input;
   const context = payload.context || {};
@@ -17,9 +41,9 @@ export function performL1CustomValidation(input: any): any {
   console.log(`Running payment validations for ${domain}/${action}`);
   
   // Initialize results array
-  const results: any[] = [];
+  const results: ValidationOutput = [];
   
-  // Validation 1: Payment method validation for retail domain confirm actions
+  // EXAMPLE: Payment method validation for retail domain confirm actions
   if (domain === 'retail' && ['confirm', 'on_confirm'].includes(action)) {
     const paymentMethodValid = validatePaymentMethod(payload);
     if (!paymentMethodValid) {
@@ -31,7 +55,7 @@ export function performL1CustomValidation(input: any): any {
     }
   }
   
-  // Validation 2: Transaction ID format validation for any financial transaction
+  // EXAMPLE: Transaction ID format validation for any financial transaction
   if (['confirm', 'on_confirm', 'init', 'on_init'].includes(action)) {
     const transactionIdValid = validateTransactionIdFormat(payload);
     if (!transactionIdValid) {
@@ -52,13 +76,17 @@ export function performL1CustomValidation(input: any): any {
 }
 
 /**
- * Validates that the payment method is valid for the domain
+ * EXAMPLE: Validates that the payment method is valid for the domain
+ * Replace with your actual business logic for payment method validation
+ * 
+ * @param payload The request payload
+ * @returns boolean indicating if validation passed
  */
-function validatePaymentMethod(payload: any): boolean {
+function validatePaymentMethod(payload: Record<string, any>): boolean {
   // Get payment info from payload
   const paymentType = payload?.message?.order?.payments?.[0]?.type;
   
-  // List of valid payment methods
+  // List of valid payment methods - replace with your actual supported methods
   const validPaymentMethods = ['CARD', 'UPI', 'WALLET', 'COD'];
   
   // Check if payment type is valid
@@ -66,9 +94,13 @@ function validatePaymentMethod(payload: any): boolean {
 }
 
 /**
- * Validates transaction ID format
+ * EXAMPLE: Validates transaction ID format
+ * Replace with your actual business logic for transaction ID validation
+ * 
+ * @param payload The request payload
+ * @returns boolean indicating if validation passed
  */
-function validateTransactionIdFormat(payload: any): boolean {
+function validateTransactionIdFormat(payload: Record<string, any>): boolean {
   // Get transaction ID from payload
   const transactionId = payload?.message?.order?.payments?.[0]?.transaction_id;
   
@@ -76,6 +108,7 @@ function validateTransactionIdFormat(payload: any): boolean {
   if (!transactionId) return true;
   
   // Check format using regex: XXX-YYYY-ZZZZZZ pattern
+  // Replace with your actual transaction ID format requirements
   const transactionIdPattern = /^[A-Z]{3}-\d{4}-[A-Z0-9]{6}$/;
   
   return transactionIdPattern.test(transactionId);
