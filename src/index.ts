@@ -41,7 +41,7 @@ const moveRelevantFiles = async () => {
 		path.resolve(__dirname, "../generated/L1-validations"),
 		path.resolve(
 			__dirname,
-			"../build-output/automation-api-service/src/validations/L1-validation"
+			"../build-output/automation-api-service/src/validations/L1-validations"
 		)
 	);
 
@@ -57,30 +57,36 @@ const moveRelevantFiles = async () => {
 			"../build-output/automation-api-service/src/validations/L0-schemas"
 		)
 	);
-	
+
 	// Copy custom L1 exception validations if they exist
-	const customValidationsDir = path.resolve(__dirname, "../src/config/l1-exception-validations");
-	
+	const customValidationsDir = path.resolve(
+		__dirname,
+		"../src/config/l1-exception-validations"
+	);
+
 	// Log the path to help debug
 	console.log(`Looking for custom validations at: ${customValidationsDir}`);
-	
+
 	// Change the target directory to be under validations instead of config
 	const targetValidationsDir = path.resolve(
 		__dirname,
 		"../build-output/automation-api-service/src/validations/L1-custom-validation"
 	);
-	
+
 	// Ensure target directory exists
 	if (!fs.existsSync(targetValidationsDir)) {
 		fse.ensureDirSync(targetValidationsDir);
 	}
-	
+
 	// If custom validations directory exists and has files, copy them
 	if (fs.existsSync(customValidationsDir)) {
-		// Get all files except README.md 
+		// Get all files except README.md
 		const files = fs.readdirSync(customValidationsDir);
 		for (const file of files) {
-			if ((file.endsWith(".ts") || file.endsWith(".js")) && file !== "README.md") {
+			if (
+				(file.endsWith(".ts") || file.endsWith(".js")) &&
+				file !== "README.md"
+			) {
 				const sourcePath = path.join(customValidationsDir, file);
 				const destPath = path.join(targetValidationsDir, file);
 				fse.copySync(sourcePath, destPath);
@@ -91,7 +97,7 @@ const moveRelevantFiles = async () => {
 	} else {
 		console.log("No custom L1 exception validations found");
 	}
-	
+
 	console.log("deleting generated folder");
 	fse.removeSync(path.resolve(__dirname, "../generated"));
 };

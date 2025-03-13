@@ -26,6 +26,6 @@
 		"dotenv": "^16.4.7",
 		"fs-extra": "^11.3.0",
 		"js-yaml": "^4.1.0",
-		"ondc-code-generator": "^0.1.2"
+		"ondc-code-generator": "^0.1.8"
 	}
 }
