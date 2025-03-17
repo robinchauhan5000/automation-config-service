@@ -23,6 +23,8 @@ export const createApiServiceLayer = async () => {
 	const comp = new ConfigCompiler(SupportedLanguages.Typescript);
 	fse.emptyDirSync(path.resolve(__dirname, "../generated"));
 	await comp.initialize(buildString);
+	// const paths = await comp.generateValidPaths();
+	// writeFileSync("./paths.json", JSON.stringify(paths, null, 2));
 	await comp.generateCode(valParsed as any, "L1-validations");
 	await comp.generateL0Schema();
 
