@@ -26,6 +26,7 @@
 		"dotenv": "^16.4.7",
 		"fs-extra": "^11.3.0",
 		"js-yaml": "^4.1.0",
+		"ondc-automation-cache-lib": "^2.1.0",
 		"ondc-code-generator": "^0.1.8"
 	}
 }
