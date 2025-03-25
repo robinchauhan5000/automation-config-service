@@ -19,6 +19,7 @@ REDIS_PASSWORD="${process.env.REDIS_PASSWORD}"
 REDIS_PORT="${process.env.REDIS_PORT}"
 MOCK_SERVER_URL="${process.env.MOCK_SERVER_URL}"
 DATA_BASE_URL="${process.env.DATA_BASE_URL}"
-API_SERVICE_URL="${process.env.API_SERVICE_URL}"`;
+CONFIG_SERVICE_URL="${process.env.CONFIG_SERVICE_URL}"
+`;
 	writeFileSync(path.resolve(__dirname, "../../generated/.env"), env);
 };
