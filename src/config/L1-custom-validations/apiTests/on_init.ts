@@ -1,1570 +1,976 @@
-/* eslint-disable no-prototype-builtins */
-import _, { isArray } from "lodash";
+import _ from "lodash";
 import { RedisService } from "ondc-automation-cache-lib";
+import { contextChecker } from "../utils/contextUtils";
 import {
-  addActionToRedisSet,
-  checkBppIdOrBapId,
-  checkContext,
-  checkItemTag,
   compareObjects,
   compareQuoteObjects,
-  isObjectEmpty,
+  getRedisValue,
   isTagsValid,
   payment_status,
-  timeDiff as timeDifference,
 } from "../utils/helper";
 import constants, { ApiSequence } from "../utils/constants";
 
-interface ValidationError {
-  valid: boolean;
-  code: number;
-  description: string;
-}
+const TTL_IN_SECONDS: number = Number(process.env.TTL_IN_SECONDS) || 3600;
 
-const onInit = async (data: any): Promise<ValidationError[]> => {
-  const result: ValidationError[] = [];
-  const TTL_IN_SECONDS: number = Number(process.env.TTL_IN_SECONDS) || 3600;
-  const flow = "2";
+// Helper to add error to result array
+const addError = (result: any[], code: number, description: string): void => {
+  result.push({
+    valid: false,
+    code,
+    description,
+  });
+};
 
+// Store billing object
+const storeBilling = async (
+  txnId: string,
+  billing: any,
+  result: any[]
+): Promise<void> => {
   try {
-    if (!data || isObjectEmpty(data)) {
-      result.push({
-        valid: false,
-        code: 20000,
-        description: "JSON cannot be empty",
-      });
-      return result;
-    }
-
-    const { message, context }: { message: any; context: any } = data;
-    const { transaction_id } = context;
-
-    if (
-      !message ||
-      !context ||
-      !message.order ||
-      isObjectEmpty(message) ||
-      isObjectEmpty(message.order)
-    ) {
-      result.push({
-        valid: false,
-        code: 20000,
-        description:
-          "/context, /message, /order or /message/order is missing or empty",
-      });
-      return result;
-    }
-
-    // Check previous call
-    try {
-      const previousCallPresent = await addActionToRedisSet(
-        context.transaction_id,
-        ApiSequence.INIT,
-        ApiSequence.ON_INIT
-      );
-      if (!previousCallPresent) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `Previous call doesn't exist`,
-        });
-        return result;
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking previous action call /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    // Fetch Redis data
-    const [
-      searchContextRaw,
-      parentItemIdSetRaw,
-      select_customIdArrayRaw,
-      domainRaw,
-    ] = await Promise.all([
-      RedisService.getKey(`${transaction_id}_${ApiSequence.SEARCH}_context`),
-      RedisService.getKey(`${transaction_id}_parentItemIdSet`),
-      RedisService.getKey(`${transaction_id}_select_customIdArray`),
-      RedisService.getKey(`${transaction_id}_domain`),
-    ]);
-
-    const searchContext = searchContextRaw
-      ? JSON.parse(searchContextRaw)
-      : null;
-    const parentItemIdSet = parentItemIdSetRaw
-      ? JSON.parse(parentItemIdSetRaw)
-      : null;
-    const select_customIdArray = select_customIdArrayRaw
-      ? JSON.parse(select_customIdArrayRaw)
-      : null;
-    const domain = domainRaw;
-
-    // Validate BAP/BPP IDs
-    if (checkBppIdOrBapId(context.bap_id)) {
-      result.push({
-        valid: false,
-        code: 20000,
-        description: "context/bap_id should not be a url",
-      });
-    }
-    if (checkBppIdOrBapId(context.bpp_id)) {
-      result.push({
-        valid: false,
-        code: 20000,
-        description: "context/bpp_id should not be a url",
-      });
-    }
-
-    // Validate domain
-    if (domain && !_.isEqual(data.context.domain.split(":")[1], domain)) {
-      result.push({
-        valid: false,
-        code: 20000,
-        description: `Domain should be same in each action`,
-      });
-    }
-
-    // Store on_init data
     await RedisService.setKey(
-      `${transaction_id}_${ApiSequence.ON_INIT}`,
-      JSON.stringify(data),
+      `${txnId}_billing`,
+      JSON.stringify(billing),
       TTL_IN_SECONDS
     );
+  } catch (err: any) {
+    addError(result, 20001, `Error storing billing: ${err.message}`);
+  }
+};
 
-    // Check context
-    try {
-      console.info(`Checking context for /${constants.ON_INIT} API`);
-      const contextRes: any = checkContext(context, constants.ON_INIT);
-      if (!contextRes.valid) {
-        const errors = contextRes.ERRORS;
-        Object.keys(errors).forEach((key: any) => {
-          result.push({
-            valid: false,
-            code: 20000,
-            description: errors[key],
-          });
-        });
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking /${constants.ON_INIT} context, ${error.stack}`
+// Store quote object
+const storeQuote = async (
+  txnId: string,
+  quote: any,
+  result: any[]
+): Promise<void> => {
+  try {
+    await RedisService.setKey(
+      `${txnId}_initQuote`,
+      JSON.stringify(quote),
+      TTL_IN_SECONDS
+    );
+  } catch (err: any) {
+    addError(result, 20002, `Error storing quote: ${err.message}`);
+  }
+};
+
+// Store payment object
+const storePayment = async (
+  txnId: string,
+  payment: any,
+  result: any[]
+): Promise<void> => {
+  try {
+    await RedisService.setKey(
+      `${txnId}_payment`,
+      JSON.stringify(payment),
+      TTL_IN_SECONDS
+    );
+  } catch (err: any) {
+    addError(result, 20003, `Error storing payment: ${err.message}`);
+  }
+};
+
+// Store applicable offers
+const storeApplicableOffers = async (
+  txnId: string,
+  offers: any[],
+  result: any[]
+): Promise<void> => {
+  try {
+    await RedisService.setKey(
+      `${txnId}_${ApiSequence.ON_INIT}_offers`,
+      JSON.stringify(offers),
+      TTL_IN_SECONDS
+    );
+  } catch (err: any) {
+    addError(result, 20004, `Error storing applicable offers: ${err.message}`);
+  }
+};
+
+// Validate provider details
+const validateProvider = async (
+  txnId: string,
+  provider: any,
+  result: any[]
+): Promise<void> => {
+  try {
+    const providerId = await getRedisValue(`${txnId}_providerId`);
+    if (providerId && providerId !== provider.id) {
+      addError(
+        result,
+        20005,
+        `Provider Id mismatches in /${constants.ON_SEARCH} and /${constants.ON_INIT}`
       );
     }
 
-    // Compare city
-    try {
-      console.info(
-        `Comparing city of ${constants.SEARCH} & ${constants.ON_INIT}`
-      );
-      if (searchContext && !_.isEqual(searchContext.city, context.city)) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `City code mismatch in ${constants.SEARCH} & ${constants.ON_INIT}`,
-        });
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while comparing city in ${constants.SEARCH} & ${constants.ON_INIT}, ${error.stack}`
+    const providerLoc = await getRedisValue(`${txnId}_providerLoc`);
+    const locationId = provider.locations?.[0]?.id;
+    if (providerLoc && providerLoc !== locationId) {
+      addError(
+        result,
+        20006,
+        `provider.locations[0].id mismatches in /${constants.ON_SEARCH} and /${constants.ON_INIT}`
       );
     }
+  } catch (err: any) {
+    addError(result, 20007, `Error validating provider: ${err.message}`);
+  }
+};
 
-    // Compare timestamp
-    try {
-      console.info(
-        `Comparing timestamp of ${constants.INIT} & ${constants.ON_INIT}`
-      );
-      const tmpstmpRaw = await RedisService.getKey(
-        `${transaction_id}_${ApiSequence.INIT}_tmpstmp`
-      );
-      const tmpstmp = tmpstmpRaw ? JSON.parse(tmpstmpRaw) : null;
-      if (tmpstmp && _.gt(tmpstmp, context.timestamp)) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `Timestamp for ${constants.INIT} api cannot be greater than or equal to ${constants.ON_INIT} api`,
-        });
-      } else if (tmpstmp) {
-        const timeDiff = timeDifference(context.timestamp, tmpstmp);
-        console.info(timeDiff);
-        if (timeDiff > 5000) {
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `context/timestamp difference between /${constants.ON_INIT} and /${constants.INIT} should be less than 5 sec`,
-          });
-        }
-      }
-      await RedisService.setKey(
-        `${transaction_id}_${ApiSequence.ON_INIT}_tmpstmp`,
-        JSON.stringify(context.timestamp),
-        TTL_IN_SECONDS
-      );
-    } catch (error: any) {
-      console.error(
-        `!!Error while comparing timestamp for /${constants.INIT} and /${constants.ON_INIT} api, ${error.stack}`
-      );
-    }
+// Validate billing timestamps and comparison
+const validateBilling = async (
+  txnId: string,
+  billing: any,
+  context: any,
+  result: any[]
+): Promise<void> => {
+  try {
+    const contextTime = new Date(context.timestamp).getTime();
 
-    // Compare message IDs
-    try {
-      console.info(
-        `Comparing Message Ids of /${constants.INIT} and /${constants.ON_INIT}`
-      );
-      const msgIdRaw = await RedisService.getKey(
-        `${transaction_id}_${ApiSequence.INIT}_msgId`
-      );
-      const msgId = msgIdRaw ? JSON.parse(msgIdRaw) : null;
-      if (msgId && !_.isEqual(msgId, context.message_id)) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `Message Ids for /${constants.INIT} and /${constants.ON_INIT} api should be same`,
-        });
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking message id for /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    const on_init = message.order;
-
-    // Check cancellation terms
-    try {
-      console.info(`Checking Cancellation terms for /${constants.ON_INIT}`);
-      if (on_init.cancellation_terms && on_init.cancellation_terms.length > 0) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `'cancellation_terms' in /message/order should not be provided as those are not enabled yet`,
-        });
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking Cancellation terms for /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    // Check provider ID and location
-    try {
-      console.info(
-        `Checking provider id and location in /${constants.ON_INIT}`
-      );
-      const providerIdRaw = await RedisService.getKey(
-        `${transaction_id}_providerId`
-      );
-      const providerId = providerIdRaw ? JSON.parse(providerIdRaw) : null;
-      if (providerId && on_init.provider.id !== providerId) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `Provider Id mismatches in /${constants.ON_SEARCH} and /${constants.ON_INIT}`,
-        });
-      }
-
-      const providerLocRaw = await RedisService.getKey(
-        `${transaction_id}_providerLoc`
-      );
-      const providerLoc = providerLocRaw ? JSON.parse(providerLocRaw) : null;
-      if (
-        providerLoc &&
-        on_init.provider.locations &&
-        isArray(on_init.provider.locations) &&
-        on_init.provider.locations.length > 0 &&
-        on_init.provider.locations[0].id !== providerLoc
-      ) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `provider.locations[0].id mismatches in /${constants.ON_SEARCH} and /${constants.ON_INIT}`,
-        });
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking provider id and location in /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    // Validate tax numbers
-    try {
-      console.info(`Checking for tax_number for ${constants.ON_INIT}`);
-      const bpp_terms_obj = on_init.tags?.find(
-        (item: any) => item?.code === "bpp_terms"
-      );
-      const tags = bpp_terms_obj?.list || [];
-      const accept_bap_terms = tags.filter(
-        (item: any) => item.code === "accept_bap_terms"
-      );
-      const np_type_on_search = await RedisService.getKey(
-        `${transaction_id}_${ApiSequence.ON_SEARCH}np_type`
-      );
-
-      let tax_number: any = {};
-      let provider_tax_number: any = {};
-      if (accept_bap_terms.length > 0) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `accept_bap_terms is not required for now!`,
-        });
-      }
-
-      tags.forEach((e: any) => {
-        if (e.code === "tax_number") {
-          if (!e.value) {
-            console.error(
-              `value must be present for tax_number in ${constants.ON_INIT}`
-            );
-            result.push({
-              valid: false,
-              code: 20000,
-              description: `value must be present for tax_number in ${constants.ON_INIT}`,
-            });
-          } else {
-            const taxNumberPattern =
-              /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-            if (!taxNumberPattern.test(e.value)) {
-              console.error(
-                `Invalid format for tax_number in ${constants.ON_INIT}`
-              );
-              result.push({
-                valid: false,
-                code: 20000,
-                description: `Invalid format for tax_number in ${constants.ON_INIT}`,
-              });
-            }
-          }
-          tax_number = e;
-        }
-        if (e.code === "provider_tax_number") {
-          if (!e.value) {
-            console.error(
-              `value must be present for provider_tax_number in ${constants.ON_INIT}`
-            );
-            result.push({
-              valid: false,
-              code: 20000,
-              description: `value must be present for provider_tax_number in ${constants.ON_INIT}`,
-            });
-          } else {
-            const taxNumberPattern = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-            if (!taxNumberPattern.test(e.value)) {
-              console.error(
-                `Invalid format for provider_tax_number in ${constants.ON_INIT}`
-              );
-              result.push({
-                valid: false,
-                code: 20000,
-                description: `Invalid format for provider_tax_number in ${constants.ON_INIT}`,
-              });
-            }
-          }
-          provider_tax_number = e;
-        }
-      });
-
-      if (_.isEmpty(tax_number)) {
-        console.error(`tax_number must be present in ${constants.ON_INIT}`);
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `tax_number must be present for ${constants.ON_INIT}`,
-        });
-      }
-      if (_.isEmpty(provider_tax_number)) {
-        console.error(
-          `provider_tax_number must be present in ${constants.ON_INIT}`
+    if (billing.created_at) {
+      const billingTime = new Date(billing.created_at).getTime();
+      if (isNaN(billingTime) || billingTime > contextTime) {
+        addError(
+          result,
+          20008,
+          `billing.created_at should not be greater than context.timestamp in /${constants.ON_INIT}`
         );
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `provider_tax_number must be present for ${constants.ON_INIT}`,
-        });
+      }
+    }
+
+    if (billing.updated_at) {
+      const billingTime = new Date(billing.updated_at).getTime();
+      if (isNaN(billingTime) || billingTime > contextTime) {
+        addError(
+          result,
+          20009,
+          `billing.updated_at should not be greater than context.timestamp in /${constants.ON_INIT}`
+        );
+      }
+    }
+
+    if (
+      billing.created_at &&
+      billing.updated_at &&
+      new Date(billing.updated_at) < new Date(billing.created_at)
+    ) {
+      addError(
+        result,
+        20010,
+        `billing.updated_at cannot be less than billing.created_at in /${constants.ON_INIT}`
+      );
+    }
+
+    const selectBilling = await getRedisValue(`${txnId}_billing_select`);
+    if (selectBilling) {
+      const billingErrors = compareObjects(selectBilling, billing);
+      billingErrors?.forEach((error: string) => {
+        addError(
+          result,
+          20011,
+          `billing: ${error} when compared with /${constants.ON_SELECT} billing object`
+        );
+      });
+    }
+  } catch (err: any) {
+    addError(result, 20012, `Error validating billing: ${err.message}`);
+  }
+};
+
+// Validate items (IDs, quantities, parent_item_id, location_id)
+const validateItems = async (
+  txnId: string,
+  items: any[],
+  context: any,
+  result: any[]
+): Promise<void> => {
+  try {
+    const itemFlfllmnts = await getRedisValue(`${txnId}_itemFlfllmnts`);
+    const itemsIdList = await getRedisValue(`${txnId}_itemsIdList`);
+    const fulfillmentIdArray = await getRedisValue(
+      `${txnId}_fulfillmentIdArray`
+    );
+    const parentItemIdSet = await getRedisValue(`${txnId}_parentItemIdSet`);
+    const onSearchItems = await getRedisValue(`${txnId}_onSearchItems`);
+
+    items.forEach((item: any, i: number) => {
+      const itemId = item.id;
+
+      // Validate item ID existence
+      if (!(itemId in itemsIdList)) {
+        addError(
+          result,
+          20013,
+          `Item not found - Item Id ${itemId} does not exist in /${constants.ON_SELECT}`
+        );
       }
 
+      // Validate fulfillment ID
+      if (!fulfillmentIdArray?.includes(item.fulfillment_id)) {
+        addError(
+          result,
+          20014,
+          `items[${i}].fulfillment_id mismatches for Item ${itemId} in /${constants.ON_SELECT} and /${constants.ON_INIT}`
+        );
+      }
+
+      // Validate quantity
       if (
-        tax_number.value?.length === 15 &&
-        provider_tax_number?.value?.length === 10 &&
-        np_type_on_search
+        itemsIdList &&
+        itemId in itemsIdList &&
+        item.quantity.count !== itemsIdList[itemId]
       ) {
-        const pan_id = tax_number.value.slice(2, 12);
+        addError(
+          result,
+          20015,
+          `Warning: items[${i}].quantity.count for item ${itemId} mismatches with /${constants.SELECT}`
+        );
+      }
+
+      // Validate parent_item_id
+      if (
+        parentItemIdSet &&
+        item.parent_item_id &&
+        !parentItemIdSet.includes(item.parent_item_id)
+      ) {
+        addError(
+          result,
+          20016,
+          `items[${i}].parent_item_id mismatches for Item ${itemId} in /${constants.ON_SEARCH} and /${constants.ON_INIT}`
+        );
+      }
+
+      // Validate type and parent_item_id
+      const typeTag = item.tags?.find((tag: any) => tag.code === "type");
+      const typeValue = typeTag?.list?.find(
+        (listItem: any) => listItem.code === "type"
+      )?.value;
+      const isItemType = typeValue === "item";
+
+      // Validate Buyer-Delivery tags
+      const fulfillment = (context.fulfillments || []).find(
+        (f: any) => f.id === item.fulfillment_id
+      );
+      if (fulfillment?.type === "Buyer-Delivery") {
+        const rtoTag = item.tags?.find((tag: any) => tag.code === "rto_action");
+
+        const returnToOrigin = rtoTag.list?.find(
+          (i: any) => i.code === "return_to_origin"
+        );
+        if (!returnToOrigin || returnToOrigin.value?.toLowerCase() !== "yes") {
+          addError(
+            result,
+            20023,
+            `'return_to_origin' must be 'yes' in 'rto_action' tag of items[${i}]`
+          );
+        }
+      }
+    });
+  } catch (err: any) {
+    addError(result, 20024, `Error validating items: ${err.message}`);
+  }
+};
+
+// Validate fulfillments (IDs, GPS, area_code, Buyer-Delivery)
+const validateFulfillments = async (
+  txnId: string,
+  fulfillments: any[],
+  result: any[]
+): Promise<void> => {
+  try {
+    const fulfillmentIdArray = await getRedisValue(
+      `${txnId}_fulfillmentIdArray`
+    );
+    const buyerGps = await getRedisValue(`${txnId}_buyerGps`);
+    const buyerAddr = await getRedisValue(`${txnId}_buyerAddr`);
+
+    fulfillments.forEach(async (fulfillment: any, i: number) => {
+      const id = fulfillment.id;
+      if (!fulfillmentIdArray?.includes(id)) {
+        addError(
+          result,
+          20025,
+          `fulfillment id ${id} does not exist in /${constants.ON_SELECT}`
+        );
+      }
+
+      if (fulfillment.type !== "Delivery") {
+        addError(
+          result,
+          20026,
+          `Fulfillment type should be 'Delivery' (case-sensitive)`
+        );
+      } else if (
+        fulfillment.tags?.length > 0 &&
+        fulfillment.type !== "Buyer-Delivery"
+      ) {
+        addError(
+          result,
+          20027,
+          `/message/order/fulfillment of type 'Delivery' should not have tags`
+        );
+      }
+
+      const gps = fulfillment.end?.location?.gps;
+      if (buyerGps && !_.isEqual(gps, buyerGps)) {
+        console.log(`buyerGps: ${buyerGps}, gps: ${gps}`);
+        addError(
+          result,
+          20028,
+          `gps coordinates in fulfillments[${i}].end.location mismatch in /${constants.ON_SELECT} & /${constants.ON_INIT}`
+        );
+      }
+
+      const areaCode = fulfillment.end?.location?.address?.area_code;
+      if (buyerAddr && !_.isEqual(areaCode, buyerAddr)) {
+        addError(
+          result,
+          20029,
+          `address.area_code in fulfillments[${i}].end.location mismatch in /${constants.ON_SELECT} & /${constants.ON_INIT}`
+        );
+      }
+
+      const address = fulfillment.end?.location?.address;
+      if (address) {
+        const lenName = address.name?.length || 0;
+        const lenBuilding = address.building?.length || 0;
+        const lenLocality = address.locality?.length || 0;
+
+        if (lenName + lenBuilding + lenLocality >= 190) {
+          addError(
+            result,
+            20030,
+            `address.name + address.building + address.locality should be < 190 chars`
+          );
+        }
+
+        if (lenBuilding <= 3) {
+          addError(result, 20031, `address.building should be > 3 chars`);
+        }
+        if (lenName <= 3) {
+          addError(result, 20032, `address.name should be > 3 chars`);
+        }
+        if (lenLocality <= 3) {
+          addError(result, 20033, `address.locality should be > 3 chars`);
+        }
+
         if (
-          pan_id !== provider_tax_number.value &&
-          np_type_on_search === "ISN"
+          address.building === address.locality ||
+          address.name === address.building ||
+          address.name === address.locality
         ) {
-          console.error(
-            `Pan_id is different in tax_number and provider_tax_number in ${constants.ON_INIT}`
+          addError(
+            result,
+            20034,
+            `address.name, address.building, and address.locality should be unique`
           );
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `Pan_id is different in tax_number and provider_tax_number in message.order.tags[0].list`,
-          });
-        } else if (
-          pan_id === provider_tax_number.value &&
-          np_type_on_search === "MSN"
-        ) {
-          console.error(
-            `Pan_id shouldn't be same in tax_number and provider_tax_number in message.order.tags[0].list`
-          );
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `Pan_id shouldn't be same in tax_number and provider_tax_number in message.order.tags[0].list`,
-          });
         }
       }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking tax numbers in /${constants.ON_INIT}, ${error.stack}`
+
+      if (fulfillment.type === "Buyer-Delivery") {
+        const orderDetailsTag = fulfillment.tags?.find(
+          (tag: any) => tag.code === "order_details"
+        );
+
+        const requiredFields = [
+          "weight_unit",
+          "weight_value",
+          "dim_unit",
+          "length",
+          "breadth",
+          "height",
+        ];
+        orderDetailsTag.list?.forEach((item: any) => {
+          if (
+            requiredFields.includes(item.code) &&
+            (!item.value || item.value.toString().trim() === "")
+          ) {
+            addError(
+              result,
+              20036,
+              `'${item.code}' is missing or empty in 'order_details' tag in fulfillments`
+            );
+          }
+        });
+
+        const rtoTag = fulfillment.tags?.find(
+          (tag: any) => tag.code === "rto_action"
+        );
+
+        const returnToOrigin = rtoTag.list?.find(
+          (i: any) => i.code === "return_to_origin"
+        );
+        if (!returnToOrigin || returnToOrigin.value?.toLowerCase() !== "yes") {
+          addError(
+            result,
+            20038,
+            `'return_to_origin' must be 'yes' in 'rto_action' tag in fulfillments`
+          );
+        }
+      }
+
+      const tracking = await getRedisValue(`${txnId}_${id}_tracking`);
+      if (tracking != null) {
+        if (tracking !== fulfillment.tracking) {
+          addError(
+            result,
+            20040,
+            `Fulfillment Tracking mismatch with the ${constants.ON_SELECT} call`
+          );
+        }
+      }
+    });
+  } catch (err: any) {
+    addError(result, 20041, `Error validating fulfillments: ${err.message}`);
+  }
+};
+
+// Validate quote
+const validateQuote = async (
+  txnId: string,
+  quote: any,
+  context: any,
+  result: any[]
+): Promise<void> => {
+  try {
+    let initBreakupPrice = 0;
+    quote.breakup.forEach((element: { price: { value: string } }) => {
+      initBreakupPrice += parseFloat(element.price.value);
+    });
+
+    const initQuotePrice = parseFloat(quote.price.value);
+    if (Math.round(initQuotePrice) !== Math.round(initBreakupPrice)) {
+      addError(
+        result,
+        20042,
+        `Quoted Price ${initQuotePrice} does not match with Net Breakup Price ${initBreakupPrice} in /${constants.ON_INIT}`
       );
-      result.push({
-        valid: false,
-        code: 20000,
-        description: `Failed to validate tax numbers in /${constants.ON_INIT}`,
+    }
+
+    const onSelectQuote = await getRedisValue(`${txnId}_quoteObj`);
+    if (onSelectQuote) {
+      const quoteErrors = compareQuoteObjects(
+        onSelectQuote,
+        quote,
+        constants.ON_SELECT,
+        constants.ON_INIT
+      );
+      quoteErrors?.forEach((error: string) => {
+        addError(result, 20043, `quote: ${error}`);
       });
     }
 
-    // Consolidated tags validation
-    try {
-      console.info(`Validating tags in /${constants.ON_INIT}`);
-      if (on_init.tags && isArray(on_init.tags)) {
-        await RedisService.setKey(
-          `${transaction_id}_bpp_tags`,
-          JSON.stringify(on_init.tags),
-          TTL_IN_SECONDS
+    const onSelectPrice = await getRedisValue(`${txnId}_onSelectPrice`);
+    if (
+      onSelectPrice &&
+      Math.round(parseFloat(onSelectPrice)) !== Math.round(initQuotePrice)
+    ) {
+      addError(
+        result,
+        20044,
+        `Quoted Price in /${constants.ON_INIT} INR ${initQuotePrice} does not match with /${constants.ON_SELECT} INR ${onSelectPrice}`
+      );
+    }
+
+    if (_.some(quote.breakup, (item) => _.has(item, "item.quantity"))) {
+      addError(
+        result,
+        20045,
+        `Extra attribute Quantity provided in quote object after on_select`
+      );
+    }
+  } catch (err: any) {
+    addError(result, 20046, `Error validating quote: ${err.message}`);
+  }
+};
+
+// Validate payment
+const validatePayment = async (
+  txnId: string,
+  payment: any,
+  context: any,
+  flow: string,
+  result: any[]
+): Promise<void> => {
+  try {
+    if (!payment) {
+      addError(
+        result,
+        20047,
+        `Payment Object can't be null in /${constants.ON_INIT}`
+      );
+      return;
+    }
+
+    const buyerFF = await getRedisValue(
+      `${txnId}_${ApiSequence.SEARCH}_buyerFF`
+    );
+    if (
+      buyerFF &&
+      parseFloat(payment["@ondc/org/buyer_app_finder_fee_amount"]) !==
+        parseFloat(buyerFF)
+    ) {
+      addError(
+        result,
+        20048,
+        `Buyer app finder fee can't change in /${constants.ON_INIT}`
+      );
+    }
+
+    const validSettlementBasis = ["delivery", "shipment"];
+    const settlementBasis = payment["@ondc/org/settlement_basis"];
+    if (settlementBasis && !validSettlementBasis.includes(settlementBasis)) {
+      addError(
+        result,
+        20049,
+        `Invalid settlement basis in /${
+          constants.ON_INIT
+        }. Expected: ${validSettlementBasis.join(", ")}`
+      );
+    }
+
+    const settlementWindow = payment["@ondc/org/settlement_window"];
+    if (
+      settlementWindow &&
+      !/^P(?=\d|T\d)(\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$/.test(
+        settlementWindow
+      )
+    ) {
+      addError(
+        result,
+        20050,
+        `Invalid settlement window in /${constants.ON_INIT}. Expected format: PTd+[MH]`
+      );
+    }
+
+    const settlementDetails = payment["@ondc/org/settlement_details"]?.[0];
+    if (!settlementDetails) {
+      addError(
+        result,
+        20051,
+        `settlement_details missing in /${constants.ON_INIT}`
+      );
+    } else {
+      await RedisService.setKey(
+        `${txnId}_sttlmntdtls`,
+        JSON.stringify(settlementDetails)
+      );
+      if (settlementDetails.settlement_counterparty !== "seller-app") {
+        addError(
+          result,
+          20052,
+          `settlement_counterparty must be 'seller-app' in @ondc/org/settlement_details`
+        );
+      }
+
+      const { settlement_type } = settlementDetails;
+      if (!["neft", "rtgs", "upi"].includes(settlement_type)) {
+        addError(
+          result,
+          20053,
+          `settlement_type must be 'neft/rtgs/upi' in @ondc/org/settlement_details`
+        );
+      } else if (settlement_type !== "upi") {
+        const missingFields = [];
+        if (!settlementDetails.bank_name) missingFields.push("bank_name");
+        if (!settlementDetails.branch_name) missingFields.push("branch_name");
+        if (
+          !settlementDetails.beneficiary_name ||
+          settlementDetails.beneficiary_name.trim() === ""
+        ) {
+          missingFields.push("beneficiary_name");
+        }
+        if (!settlementDetails.settlement_phase)
+          missingFields.push("settlement_phase");
+        if (!settlementDetails.settlement_ifsc_code)
+          missingFields.push("settlement_ifsc_code");
+        if (!settlementDetails.settlement_counterparty)
+          missingFields.push("settlement_counterparty");
+        if (
+          !settlementDetails.settlement_bank_account_no ||
+          settlementDetails.settlement_bank_account_no.trim() === ""
+        ) {
+          missingFields.push("settlement_bank_account_no");
+        }
+        if (missingFields.length > 0) {
+          addError(
+            result,
+            20054,
+            `Payment details missing: ${missingFields.join(", ")}`
+          );
+        }
+      } else if (
+        !settlementDetails.upi_address ||
+        settlementDetails.upi_address.trim() === ""
+      ) {
+        addError(result, 20055, `Payment details missing: upi_address`);
+      }
+    }
+
+    if (payment.collected_by === "BPP") {
+      if (!payment.type || payment.type !== "ON-ORDER") {
+        addError(result, 20056, "Type must be 'ON-ORDER' in payment");
+      }
+      if (!payment.uri || !/^https?:\/\/[^\s/$.?#].[^\s]*$/.test(payment.uri)) {
+        addError(result, 20057, "Uri must be a valid URL in payment");
+      }
+      if (!payment.status || payment.status !== "NOT-PAID") {
+        addError(result, 20058, "Status must be 'NOT-PAID' in payment");
+      }
+      if (
+        !payment.params ||
+        typeof payment.params !== "object" ||
+        payment.params === null
+      ) {
+        addError(result, 20059, "Params must be a non-null object in payment");
+      }
+      if (
+        !payment["@ondc/org/settlement_basis"] ||
+        payment["@ondc/org/settlement_basis"] !== "delivery"
+      ) {
+        addError(
+          result,
+          20060,
+          "Settlement_basis must be 'delivery' in payment"
+        );
+      }
+      if (
+        !payment["@ondc/org/settlement_window"] ||
+        !/^P(\d+D)?$/.test(payment["@ondc/org/settlement_window"])
+      ) {
+        addError(
+          result,
+          20061,
+          "Settlement_window must be a valid ISO 8601 duration in payment"
+        );
+      }
+      if (
+        !payment.tags ||
+        !Array.isArray(payment.tags) ||
+        payment.tags.length === 0
+      ) {
+        addError(result, 20062, "Tags must be a non-empty array in payment");
+      }
+
+      if (payment.params) {
+        if (
+          !payment.params.currency ||
+          !/^[A-Z]{3}$/.test(payment.params.currency)
+        ) {
+          addError(
+            result,
+            20063,
+            "Currency must be a valid ISO 4217 code in params"
+          );
+        }
+        if (
+          !payment.params.transaction_id ||
+          typeof payment.params.transaction_id !== "string" ||
+          payment.params.transaction_id === ""
+        ) {
+          addError(
+            result,
+            20064,
+            "Transaction_id must be a non-empty string in params"
+          );
+        }
+        if (
+          !payment.params.amount ||
+          !/^\d*\.\d{2}$/.test(payment.params.amount)
+        ) {
+          addError(
+            result,
+            20065,
+            "Amount must be a valid decimal number in params"
+          );
+        }
+      }
+
+      payment.tags?.forEach((tag: any, index: number) => {
+        if (!tag.code || tag.code !== "bpp_collect") {
+          addError(
+            result,
+            20066,
+            `payment.tag[${index}].code must be 'bpp_collect'`
+          );
+        }
+        if (!tag.list || !Array.isArray(tag.list) || tag.list.length === 0) {
+          addError(
+            result,
+            20067,
+            `payment.tag[${index}].list must be a non-empty array`
+          );
+        }
+        const codes = new Set();
+        tag.list?.forEach((item: any, itemIndex: number) => {
+          if (!item.code || !["success", "error"].includes(item.code)) {
+            addError(
+              result,
+              20068,
+              `payment.tag[${index}].list[${itemIndex}].code must be 'success' or 'error'`
+            );
+          }
+          if (item.code && codes.has(item.code)) {
+            addError(
+              result,
+              20069,
+              `payment.tag[${index}].list[${itemIndex}].code is a duplicate`
+            );
+          } else if (item.code) {
+            codes.add(item.code);
+          }
+          if (!item.value || typeof item.value !== "string") {
+            addError(
+              result,
+              20070,
+              `payment.tag[${index}].list[${itemIndex}].value must be a string`
+            );
+          } else if (item.code === "success" && item.value !== "Y") {
+            addError(
+              result,
+              20071,
+              `payment.tag[${index}].list[${itemIndex}].value must be 'Y' for code 'success'`
+            );
+          } else if (
+            item.code === "error" &&
+            (item.value === "" || item.value === "..")
+          ) {
+            addError(
+              result,
+              20072,
+              `payment.tag[${index}].list[${itemIndex}].value is invalid for code 'error'`
+            );
+          }
+        });
+      });
+    }
+
+    const status = payment_status(payment, flow);
+    if (!status || status.message) {
+      addError(
+        result,
+        20073,
+        status.message || `Transaction_id missing in message/order/payment`
+      );
+    }
+  } catch (err: any) {
+    addError(result, 20074, `Error validating payment: ${err.message}`);
+  }
+};
+
+// Validate tags (tax numbers, bpp_terms)
+const validateTags = async (
+  txnId: string,
+  tags: any[],
+  result: any[]
+): Promise<void> => {
+  try {
+    if (tags?.length) {
+      if (!isTagsValid(tags, "bpp_terms")) {
+        addError(
+          result,
+          20075,
+          `Tags should have valid gst number and fields in /${constants.ON_INIT}`
+        );
+      }
+
+      const bppTermsTag = tags.find((tag: any) => tag.code === "bpp_terms");
+      if (bppTermsTag) {
+        const tagsList = bppTermsTag.list || [];
+        const acceptBapTerms = tagsList.filter(
+          (item: any) => item.code === "accept_bap_terms"
+        );
+        if (acceptBapTerms.length > 0) {
+          addError(result, 20076, `accept_bap_terms is not required`);
+        }
+
+        let tax_number: any = {};
+        let provider_tax_number: any = {};
+        const np_type_on_search = await getRedisValue(
+          `${txnId}_${ApiSequence.ON_SEARCH}np_type`
         );
 
-        const bppTermsTag = on_init.tags.find(
-          (tag: any) => tag.code === "bpp_terms"
-        );
-        if (bppTermsTag) {
-          await RedisService.setKey(
-            `${transaction_id}_list_ON_INIT`,
-            JSON.stringify(bppTermsTag.list),
-            TTL_IN_SECONDS
+        tagsList.forEach((e: any) => {
+          if (e.code === "tax_number") {
+            if (!e.value) {
+              addError(
+                result,
+                20077,
+                `value must be present for tax_number in ${constants.ON_INIT}`
+              );
+            } else {
+              const taxNumberPattern =
+                /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+              if (!taxNumberPattern.test(e.value)) {
+                addError(
+                  result,
+                  20078,
+                  `Invalid format for tax_number in ${constants.ON_INIT}`
+                );
+              }
+            }
+            tax_number = e;
+          }
+          if (e.code === "provider_tax_number") {
+            if (!e.value) {
+              addError(
+                result,
+                20079,
+                `value must be present for provider_tax_number in ${constants.ON_INIT}`
+              );
+            } else {
+              const taxNumberPattern = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+              if (!taxNumberPattern.test(e.value)) {
+                addError(
+                  result,
+                  20080,
+                  `Invalid format for provider_tax_number in ${constants.ON_INIT}`
+                );
+              }
+            }
+            provider_tax_number = e;
+          }
+        });
+
+        if (_.isEmpty(tax_number)) {
+          addError(
+            result,
+            20081,
+            `tax_number must be present in ${constants.ON_INIT}`
+          );
+        }
+        if (_.isEmpty(provider_tax_number)) {
+          addError(
+            result,
+            20082,
+            `provider_tax_number must be present in ${constants.ON_INIT}`
           );
         }
 
-        const isValid = isTagsValid(on_init.tags, "bpp_terms");
-        if (!isValid) {
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `Tags should have valid gst number and fields in /${constants.ON_INIT}`,
-          });
+        if (
+          tax_number.value?.length === 15 &&
+          provider_tax_number?.value?.length === 10 &&
+          np_type_on_search
+        ) {
+          const pan_id = tax_number.value.slice(2, 12);
+          if (
+            pan_id !== provider_tax_number.value &&
+            np_type_on_search === "ISN"
+          ) {
+            addError(
+              result,
+              20083,
+              `Pan_id is different in tax_number and provider_tax_number`
+            );
+          } else if (
+            pan_id === provider_tax_number.value &&
+            np_type_on_search === "MSN"
+          ) {
+            addError(
+              result,
+              20084,
+              `Pan_id shouldn't be same in tax_number and provider_tax_number`
+            );
+          }
         }
 
-        for (const tag of on_init.tags) {
+        tags.forEach((tag: any) => {
           if (tag.code === "bap_terms") {
-            const hasStaticTerms = tag.list.some(
-              (item: { code: string }) => item.code === "static_terms"
+            const hasStaticTerms = tag.list?.some(
+              (item: any) => item.code === "static_terms"
             );
             if (hasStaticTerms) {
-              result.push({
-                valid: false,
-                code: 20000,
-                description: `static_terms is not required for now! in ${constants.ON_INIT}`,
-              });
+              addError(
+                result,
+                20085,
+                `static_terms is not required in ${constants.ON_INIT}`
+              );
             }
           }
-
           const providerTaxNumber = tag.list?.find(
             (item: any) => item.code === "provider_tax_number"
           );
           if (providerTaxNumber) {
             const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
             if (!panRegex.test(providerTaxNumber.value)) {
-              result.push({
-                valid: false,
-                code: 20000,
-                description: `'provider_tax_number' should have a valid PAN number format`,
-              });
-            }
-          }
-        }
-
-        await RedisService.setKey(
-          `${transaction_id}_on_init_tags`,
-          JSON.stringify(on_init.tags),
-          TTL_IN_SECONDS
-        );
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while validating tags in /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    // Compare item and fulfillment IDs
-    // Compare item and fulfillment IDs
-    try {
-      console.info(
-        `Comparing item Ids and fulfillment Ids in /${constants.ON_SELECT} and /${constants.ON_INIT}`
-      );
-      const itemFlfllmntsRaw = await RedisService.getKey(
-        `${transaction_id}_itemFlfllmnts`
-      );
-      const itemFlfllmnts = itemFlfllmntsRaw
-        ? JSON.parse(itemFlfllmntsRaw)
-        : null;
-      const itemsIdListRaw = await RedisService.getKey(
-        `${transaction_id}_itemsIdList`
-      );
-      const itemsIdList = itemsIdListRaw ? JSON.parse(itemsIdListRaw) : null;
-      const fulfillmentIdArrayRaw = await RedisService.getKey(
-        `${transaction_id}_fulfillmentIdArray`
-      );
-      const fulfillmentIdArray = fulfillmentIdArrayRaw
-        ? JSON.parse(fulfillmentIdArrayRaw)
-        : null;
-
-      for (let i = 0; i < (on_init.items?.length || 0); i++) {
-        const itemId: any = on_init.items[i].id;
-        const item = on_init.items[i];
-
-        if (select_customIdArray && checkItemTag(item, select_customIdArray)) {
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `items[${i}].tags.parent_id mismatches for Item ${itemId} in /${constants.SELECT} and /${constants.ON_INIT}`,
-          });
-        }
-
-        if (
-          parentItemIdSet &&
-          item.parent_item_id &&
-          !parentItemIdSet.includes(item.parent_item_id)
-        ) {
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `items[${i}].parent_item_id mismatches for Item ${itemId} in /${constants.ON_SEARCH} and /${constants.ON_INIT}`,
-          });
-        }
-
-        if (
-          (itemFlfllmnts &&
-            fulfillmentIdArray &&
-            itemId in fulfillmentIdArray) ||
-          itemId in itemFlfllmnts
-        ) {
-          if (
-            !fulfillmentIdArray.includes(on_init.items[i].fulfillment_id) &&
-            !itemFlfllmnts[itemId]
-          ) {
-            result.push({
-              valid: false,
-              code: 20000,
-              description: `items[${i}].fulfillment_id mismatches for Item ${itemId} in /${constants.ON_SELECT} and /${constants.ON_INIT}`,
-            });
-          }
-        } else {
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `Item Id ${itemId} does not exist in /${constants.ON_SELECT}`,
-          });
-        }
-
-        if (itemsIdList && itemId in itemsIdList) {
-          if (!item.quantity || item.quantity.count == null) {
-            result.push({
-              valid: false,
-              code: 20000,
-              description: `items[${i}].quantity.count is missing or undefined for Item ${itemId} in /${constants.ON_INIT}`,
-            });
-          } else if (item.quantity.count !== itemsIdList[itemId]) {
-            result.push({
-              valid: false,
-              code: 20000,
-              description: `Warning: items[${i}].quantity.count for item ${itemId} mismatches with the items quantity selected in /${constants.SELECT}`,
-            });
-          }
-        }
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while comparing Item and Fulfillment Id in /${constants.ON_SELECT} and /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    // Validate fulfillments (GPS and Area Code)
-    try {
-      console.info(`Validating fulfillments`);
-      const buyerGpsRaw = await RedisService.getKey(
-        `${transaction_id}_buyerGps`
-      );
-      const buyerGps = buyerGpsRaw ? JSON.parse(buyerGpsRaw) : null;
-      const buyerAddrRaw = await RedisService.getKey(
-        `${transaction_id}_buyerAddr`
-      );
-      const buyerAddr = buyerAddrRaw ? JSON.parse(buyerAddrRaw) : null;
-
-      on_init?.fulfillments?.forEach((fulfillment: any, index: number) => {
-        const { type } = fulfillment;
-        if (type !== "Delivery") {
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `Fulfillment type should be 'Delivery' (case-sensitive)`,
-          });
-        } else if (fulfillment.tags && fulfillment.tags.length > 0) {
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `/message/order/fulfillment of type 'Delivery' should not have tags`,
-          });
-        }
-
-        const gps = fulfillment.end?.location?.gps;
-        if (gps == null || gps === "") {
-          console.info(
-            `Missing gps coordinates for fulfillment at index ${index} in /${constants.ON_INIT}`
-          );
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `fulfillments[${index}].end.location.gps is missing or empty in /${constants.ON_INIT}`,
-          });
-        } else if (buyerGps && !_.isEqual(gps, buyerGps)) {
-          console.info(
-            `GPS coordinates mismatch for fulfillment at index ${index} in /${constants.ON_INIT}`
-          );
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `gps coordinates in fulfillments[${index}].end.location mismatch in /${constants.ON_SELECT} & /${constants.ON_INIT}`,
-          });
-        }
-
-        const areaCode = fulfillment.end?.location?.address?.area_code;
-        if (areaCode == null || areaCode === "") {
-          console.info(
-            `Missing area_code for fulfillment at index ${index} in /${constants.ON_INIT}`
-          );
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `fulfillments[${index}].end.location.address.area_code is missing or empty in /${constants.ON_INIT}`,
-          });
-        } else if (buyerAddr && !_.isEqual(areaCode, buyerAddr)) {
-          console.info(
-            `Area code mismatch for fulfillment at index ${index} in /${constants.ON_INIT}`
-          );
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `address.area_code in fulfillments[${index}].end.location mismatch in /${constants.ON_SELECT} & /${constants.ON_INIT}`,
-          });
-        }
-      });
-    } catch (error: any) {
-      console.error(`!!Error while validating fulfillments, ${error.stack}`);
-    }
-
-    // Check fulfillment IDs, types, and tracking
-    try {
-      console.info("Checking fulfillment.id, fulfillment.type and tracking");
-      for (const ff of on_init.fulfillments || []) {
-        if (!ff.id) {
-          console.info(`Fulfillment Id must be present`);
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `Fulfillment Id must be present`,
-          });
-          continue;
-        }
-
-        const trackingRaw = await RedisService.getKey(
-          `${transaction_id}_${ff.id}_tracking`
-        );
-        const tracking = trackingRaw ? JSON.parse(trackingRaw) : null;
-        if (tracking != null) {
-          if (ff.tracking === false || ff.tracking === true) {
-            if (tracking !== ff.tracking) {
-              console.info(
-                `Fulfillment Tracking mismatch with the ${constants.ON_SELECT} call`
+              addError(
+                result,
+                20086,
+                `'provider_tax_number' should have a valid PAN number format`
               );
-              result.push({
-                valid: false,
-                code: 20000,
-                description: `Fulfillment Tracking mismatch with the ${constants.ON_SELECT} call`,
-              });
-            }
-          } else {
-            console.info(
-              `Tracking must be present for fulfillment ID: ${ff.id} in boolean form`
-            );
-            result.push({
-              valid: false,
-              code: 20000,
-              description: `Tracking must be present for fulfillment ID: ${ff.id} in boolean form`,
-            });
-          }
-        }
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking fulfillments id, type and tracking in /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    try {
-      const fulfillment = on_init.fulfillments[0];
-      if (fulfillment?.type === "Buyer-Delivery") {
-        on_init.items.forEach((item: any, index: any) => {
-          const itemPath = `order.items[${index}]`;
-
-          const rtoTag = item.tags?.find(
-            (tag: any) => tag.code === "rto_action"
-          );
-
-          if (!rtoTag) {
-            result.push({
-              valid: false,
-              code: 20011,
-              description: `'rto_action' tag is missing in ${itemPath}`,
-            });
-          } else {
-            const returnToOrigin = rtoTag.list?.find(
-              (i: any) => i.code === "return_to_origin"
-            );
-
-            if (
-              !returnToOrigin ||
-              returnToOrigin.value?.toLowerCase() !== "yes"
-            ) {
-              result.push({
-                valid: false,
-                code: 20012,
-                description: `'return_to_origin' must be 'yes' in 'rto_action' tag of ${itemPath}`,
-              });
             }
           }
         });
-
-        const orderDetailsTag = fulfillment.tags?.find(
-          (tag: any) => tag.code === "order_details"
-        );
-        if (!orderDetailsTag) {
-          result.push({
-            valid: false,
-            code: 20007,
-            description: `Missing 'order_details' tag in fulfillments when fulfillment.type is 'Buyer-Delivery'`,
-          });
-        } else {
-          const requiredFields = [
-            "weight_unit",
-            "weight_value",
-            "dim_unit",
-            "length",
-            "breadth",
-            "height",
-          ];
-
-          const list = orderDetailsTag.list || [];
-          for (const field of requiredFields) {
-            const item = list.find((i: any) => i.code === field);
-            if (!item || !item.value || item.value.toString().trim() === "") {
-              result.push({
-                valid: false,
-                code: 20008,
-                description: `'${field}' is missing or empty in 'order_details' tag in fulfillments`,
-              });
-            }
-          }
-
-          const rtoTag = fulfillment.tags?.find(
-            (tag: any) => tag.code === "rto_action"
-          );
-
-          if (!rtoTag) {
-            result.push({
-              valid: false,
-              code: 20009,
-              description: `'rto_action' tag is missing in fulfillments for Buyer-Delivery fulfillment`,
-            });
-          } else {
-            const returnToOrigin = rtoTag.list?.find(
-              (i: any) => i.code === "return_to_origin"
-            );
-
-            if (
-              !returnToOrigin ||
-              returnToOrigin.value?.toLowerCase() !== "yes"
-            ) {
-              result.push({
-                valid: false,
-                code: 20010,
-                description: `'return_to_origin' must be set to 'yes' in 'rto_action' tag in fulfillments`,
-              });
-            }
-          }
-        }
       }
-    } catch (error: any) {
-      `Error while checking fulfillments type for buyer delivery/${constants.ON_INIT}`;
-    }
 
-    try {
-      const fulfillment = on_init.fulfillments[0];
-      if (fulfillment?.type === "Buyer-Delivery") {
-        on_init.items.forEach((item: any, index: any) => {
-          const itemPath = `order.items[${index}]`;
-
-          const rtoTag = item.tags?.find(
-            (tag: any) => tag.code === "rto_action"
-          );
-
-          if (!rtoTag) {
-            result.push({
-              valid: false,
-              code: 20011,
-              description: `'rto_action' tag is missing in ${itemPath}`,
-            });
-          } else {
-            const returnToOrigin = rtoTag.list?.find(
-              (i: any) => i.code === "return_to_origin"
-            );
-
-            if (
-              !returnToOrigin ||
-              returnToOrigin.value?.toLowerCase() !== "yes"
-            ) {
-              result.push({
-                valid: false,
-                code: 20012,
-                description: `'return_to_origin' must be 'yes' in 'rto_action' tag of ${itemPath}`,
-              });
-            }
-          }
-        });
-
-        const orderDetailsTag = fulfillment.tags?.find(
-          (tag: any) => tag.code === "order_details"
-        );
-        if (!orderDetailsTag) {
-          result.push({
-            valid: false,
-            code: 20007,
-            description: `Missing 'order_details' tag in fulfillments when fulfillment.type is 'Buyer-Delivery'`,
-          });
-        } else {
-          const requiredFields = [
-            "weight_unit",
-            "weight_value",
-            "dim_unit",
-            "length",
-            "breadth",
-            "height",
-          ];
-
-          const list = orderDetailsTag.list || [];
-          for (const field of requiredFields) {
-            const item = list.find((i: any) => i.code === field);
-            if (!item || !item.value || item.value.toString().trim() === "") {
-              result.push({
-                valid: false,
-                code: 20008,
-                description: `'${field}' is missing or empty in 'order_details' tag in fulfillments`,
-              });
-            }
-          }
-
-          const rtoTag = fulfillment.tags?.find(
-            (tag: any) => tag.code === "rto_action"
-          );
-
-          if (!rtoTag) {
-            result.push({
-              valid: false,
-              code: 20009,
-              description: `'rto_action' tag is missing in fulfillments for Buyer-Delivery fulfillment`,
-            });
-          } else {
-            const returnToOrigin = rtoTag.list?.find(
-              (i: any) => i.code === "return_to_origin"
-            );
-
-            if (
-              !returnToOrigin ||
-              returnToOrigin.value?.toLowerCase() !== "yes"
-            ) {
-              result.push({
-                valid: false,
-                code: 20010,
-                description: `'return_to_origin' must be set to 'yes' in 'rto_action' tag in fulfillments`,
-              });
-            }
-          }
-        }
-      }
-    } catch (error: any) {
-      `Error while checking fulfillments type for buyer delivery/${constants.ON_INIT}`;
-    }
-
-    // Compare billing object
-    try {
-      console.info(
-        `Comparing billing object in /${constants.INIT} and /${constants.ON_INIT}`
-      );
-      const billingRaw = await RedisService.getKey(`${transaction_id}_billing`);
-      const billing = billingRaw ? JSON.parse(billingRaw) : null;
-
-      if (billing) {
-        const billingErrors = compareObjects(billing, on_init.billing);
-        if (billingErrors) {
-          for (const error of billingErrors) {
-            result.push({
-              valid: false,
-              code: 20000,
-              description: `${error} when compared with init billing object`,
-            });
-          }
-        }
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while comparing billing object in /${constants.INIT} and /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    // Check fulfillment objects
-    try {
-      console.info(`Checking fulfillments objects in /${constants.ON_INIT}`);
-      const fulfillmentIdArrayRaw = await RedisService.getKey(
-        `${transaction_id}_fulfillmentIdArray`
-      );
-      const fulfillmentIdArray = fulfillmentIdArrayRaw
-        ? JSON.parse(fulfillmentIdArrayRaw)
-        : null;
-      const itemFlfllmntsRaw = await RedisService.getKey(
-        `${transaction_id}_itemFlfllmnts`
-      );
-      const itemFlfllmnts = itemFlfllmntsRaw
-        ? JSON.parse(itemFlfllmntsRaw)
-        : null;
-
-      for (let i = 0; i < (on_init.fulfillments?.length || 0); i++) {
-        if (on_init.fulfillments[i].id) {
-          const id = on_init.fulfillments[i].id;
-          if (fulfillmentIdArray && !fulfillmentIdArray.includes(id)) {
-            result.push({
-              valid: false,
-              code: 20000,
-              description: `fulfillment id ${id} does not exist in /${constants.ON_SELECT}`,
-            });
-          }
-        } else {
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `fulfillments.id is missing in /${constants.ON_INIT}`,
-          });
-        }
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking fulfillments object in /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    // Validate item tags and parent_item_id
-    try {
-      console.info(
-        `Validating item tags and parent_item_id in /${constants.ON_INIT}`
-      );
-      const items = on_init.items || [];
-      for (let index = 0; index < items.length; index++) {
-        const item = items[index];
-        let isItemType = false;
-        let isCustomizationType = false;
-
-        if (item.tags) {
-          const typeTag = item.tags.find((tag: any) => tag.code === "type");
-          if (typeTag && typeTag.list) {
-            const typeValue = typeTag.list.find(
-              (listItem: any) => listItem.code === "type"
-            )?.value;
-            isItemType = typeValue === "item";
-            isCustomizationType = typeValue === "customization";
-          }
-        }
-
-        if ((isItemType || isCustomizationType) && !item.parent_item_id) {
-          console.info(
-            `Missing parent_item_id for item with ID: ${
-              item.id || "undefined"
-            } at index ${index}`
-          );
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `items[${index}]: parent_item_id is required for items with type 'item' or 'customization'`,
-          });
-        }
-
-        if (item.parent_item_id && !(isItemType || isCustomizationType)) {
-          console.info(
-            `Missing type: item or type: customization tag for item with parent_item_id: ${item.parent_item_id} at index ${index}`
-          );
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `items[${index}]: items with parent_item_id must have a type tag of 'item' or 'customization'`,
-          });
-        }
-
-        if (isCustomizationType && select_customIdArray) {
-          const parentTag = item.tags.find((tag: any) => tag.code === "parent");
-          if (!parentTag) {
-            console.info(
-              `Missing parent tag for customization item with ID: ${
-                item.id || "undefined"
-              } at index ${index}`
-            );
-            result.push({
-              valid: false,
-              code: 20000,
-              description: `items[${index}]: customization items must have a parent tag`,
-            });
-          } else {
-            const parentId = parentTag.list.find(
-              (listItem: any) => listItem.code === "id"
-            )?.value;
-            if (parentId && checkItemTag(item, select_customIdArray)) {
-              console.info(
-                `Invalid parent tag id: ${parentId} for customization item with ID: ${
-                  item.id || "undefined"
-                } at index ${index}`
-              );
-              result.push({
-                valid: false,
-                code: 20000,
-                description: `items[${index}]: parent tag id ${parentId} must be in select_customIdArray for customization items`,
-              });
-            }
-          }
-        }
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking parent_item_id and type tags in /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    // Check quote and payment
-    try {
-      console.info(`Checking Quote and Payment for /${constants.ON_INIT}`);
-      let initQuotePrice = 0;
-      let initBreakupPrice = 0;
-
-      on_init.quote.breakup.forEach((element: { price: { value: string } }) => {
-        initBreakupPrice += parseFloat(element.price.value);
-      });
-      console.info(`/${constants.ON_INIT} Price Breakup: ${initBreakupPrice}`);
-
-      initQuotePrice = parseFloat(on_init.quote.price.value);
       await RedisService.setKey(
-        `${transaction_id}_initQuotePrice`,
-        JSON.stringify(initQuotePrice),
+        `${txnId}_bpp_tags`,
+        JSON.stringify(tags),
         TTL_IN_SECONDS
       );
-      console.info(`/${constants.ON_INIT} Quoted Price: ${initQuotePrice}`);
-
-      if (Math.round(initQuotePrice) !== Math.round(initBreakupPrice)) {
-        console.info(
-          `Quoted Price in /${constants.ON_INIT} is not equal to the Net Breakup Price`
-        );
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `Quoted Price ${initQuotePrice} does not match with Net Breakup Price ${initBreakupPrice} in /${constants.ON_INIT}`,
-        });
-      }
-
-      const onSelectPriceRaw = await RedisService.getKey(
-        `${transaction_id}_onSelectPrice`
+      await RedisService.setKey(
+        `${txnId}_on_init_tags`,
+        JSON.stringify(tags),
+        TTL_IN_SECONDS
       );
-      const onSelectPrice = onSelectPriceRaw
-        ? JSON.parse(onSelectPriceRaw)
-        : null;
-      if (
-        onSelectPrice &&
-        Math.round(onSelectPrice) !== Math.round(initQuotePrice)
-      ) {
-        console.info(
-          `Quoted Price in /${constants.ON_INIT} is not equal to the quoted price in /${constants.ON_SELECT}`
-        );
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `Quoted Price in /${constants.ON_INIT} INR ${initQuotePrice} does not match with the quoted price in /${constants.ON_SELECT} INR ${onSelectPrice}`,
-        });
-      }
-
-      if (!on_init.payment) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `Payment Object can't be null in /${constants.ON_INIT}`,
-        });
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking /${constants.ON_INIT} Quoted Price and Net Price Breakup, ${error.stack}`
-      );
-    }
-
-    // Check buyer app finder fee
-    try {
-      console.info(
-        `Checking Buyer App finder fee amount in /${constants.ON_INIT}`
-      );
-      const buyerFFRaw = await RedisService.getKey(
-        `${transaction_id}_${ApiSequence.SEARCH}_buyerFF`
-      );
-      const buyerFF = buyerFFRaw ? JSON.parse(buyerFFRaw) : null;
-      if (
-        !on_init.payment["@ondc/org/buyer_app_finder_fee_amount"] ||
-        parseFloat(on_init.payment["@ondc/org/buyer_app_finder_fee_amount"]) !==
-          buyerFF
-      ) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `Buyer app finder fee can't change in /${constants.ON_INIT}`,
-        });
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking buyer app finder fee in /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    // Check settlement basis
-    try {
-      console.info(`Checking Settlement basis in /${constants.ON_INIT}`);
-      const validSettlementBasis = ["delivery", "shipment"];
-      const settlementBasis = on_init.payment["@ondc/org/settlement_basis"];
-      if (settlementBasis) {
-        if (!validSettlementBasis.includes(settlementBasis)) {
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `Invalid settlement basis in /${
-              constants.ON_INIT
-            }. Expected one of: ${validSettlementBasis.join(", ")}`,
-          });
-        }
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking settlement basis in /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    // Check settlement window
-    try {
-      console.info(`Checking Settlement Window in /${constants.ON_INIT}`);
-      const settlementWindow = on_init.payment["@ondc/org/settlement_window"];
-      if (
-        settlementWindow &&
-        !/^P(?=\d|T\d)(\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$/.test(
-          settlementWindow
-        )
-      ) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `Invalid settlement window in /${constants.ON_INIT}. Expected format: PTd+[MH] (e.g., PT1H, PT30M)`,
-        });
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking settlement window in /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    // Check payment details
-    try {
-      console.info(`Checking payment object in /${constants.ON_INIT}`);
-      const payment = on_init.payment;
-      const settlementDetails = payment["@ondc/org/settlement_details"]?.[0];
-      if (!settlementDetails) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `settlement_details missing in /${constants.ON_INIT}`,
-        });
-      } else {
-        if (settlementDetails.settlement_counterparty !== "seller-app") {
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `settlement_counterparty is expected to be 'seller-app' in @ondc/org/settlement_details`,
-          });
-        }
-
-        const { settlement_type } = settlementDetails;
-        if (!["neft", "rtgs", "upi"].includes(settlement_type)) {
-          console.error(
-            `settlement_type is expected to be 'neft/rtgs/upi' in @ondc/org/settlement_details in /${constants.ON_INIT}`
-          );
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `settlement_type is expected to be 'neft/rtgs/upi' in @ondc/org/settlement_details`,
-          });
-        } else if (settlement_type !== "upi") {
-          const missingFields: any = [];
-          if (!settlementDetails.bank_name) missingFields.push("bank_name");
-          if (!settlementDetails.branch_name) missingFields.push("branch_name");
-          if (
-            !settlementDetails.beneficiary_name ||
-            settlementDetails.beneficiary_name.trim() === ""
-          ) {
-            missingFields.push("beneficiary_name");
-          }
-          if (!settlementDetails.settlement_phase)
-            missingFields.push("settlement_phase");
-          if (!settlementDetails.settlement_ifsc_code)
-            missingFields.push("settlement_ifsc_code");
-          if (!settlementDetails.settlement_counterparty)
-            missingFields.push("settlement_counterparty");
-          if (
-            !settlementDetails.settlement_bank_account_no ||
-            settlementDetails.settlement_bank_account_no.trim() === ""
-          ) {
-            missingFields.push("settlement_bank_account_no");
-          }
-
-          if (missingFields.length > 0) {
-            console.error(
-              `Payment details are missing: ${missingFields.join(", ")} /${
-                constants.ON_INIT
-              }`
-            );
-            result.push({
-              valid: false,
-              code: 20000,
-              description: `Payment details are missing: ${missingFields.join(
-                ", "
-              )}/${constants.ON_INIT}`,
-            });
-          }
-        } else if (
-          !settlementDetails.upi_address ||
-          settlementDetails.upi_address.trim() === ""
-        ) {
-          console.error(`Payment details are missing /${constants.ON_INIT}`);
-          result.push({
-            valid: false,
-            code: 20000,
-            description: `Payment details are missing/${constants.ON_INIT}`,
-          });
-        }
-
+      if (bppTermsTag) {
         await RedisService.setKey(
-          `${transaction_id}_sttlmntdtls`,
-          JSON.stringify(settlementDetails),
+          `${txnId}_list_ON_INIT`,
+          JSON.stringify(bppTermsTag.list),
           TTL_IN_SECONDS
         );
       }
-
-      const collected_by = on_init.payment?.collected_by;
-
-      if (collected_by && collected_by === "BPP") {
-        // Top-Level Field Checks
-        if (!payment.type || payment.type !== "ON-ORDER") {
-          result.push({
-            valid: false,
-            code: 20006,
-            description:
-              "Type is missing or not equal to 'ON-ORDER' in payment",
-          });
-        }
-
-        if (
-          !payment.uri ||
-          !/^https?:\/\/[^\s/$.?#].[^\s]*$/.test(payment.uri)
-        ) {
-          result.push({
-            valid: false,
-            code: 20006,
-            description: "Uri is missing or not a valid URL in payment",
-          });
-        }
-
-        if (!payment.status || payment.status !== "NOT-PAID") {
-          result.push({
-            valid: false,
-            code: 20006,
-            description:
-              "Status is missing or not equal to 'NOT-PAID' in payment",
-          });
-        }
-
-        if (
-          !payment.params ||
-          typeof payment.params !== "object" ||
-          payment.params === null
-        ) {
-          result.push({
-            valid: false,
-            code: 20006,
-            description: "Params is missing, not an object, or null in payment",
-          });
-        }
-
-        if (
-          !payment["@ondc/org/settlement_basis"] ||
-          payment["@ondc/org/settlement_basis"] !== "delivery"
-        ) {
-          result.push({
-            valid: false,
-            code: 20006,
-            description:
-              "Settlement_basis is missing or not equal to 'delivery' in payment",
-          });
-        }
-
-        if (
-          !payment["@ondc/org/settlement_window"] ||
-          !/^P(\d+D)?$/.test(payment["@ondc/org/settlement_window"])
-        ) {
-          result.push({
-            valid: false,
-            code: 20006,
-            description:
-              "Settlement_window is missing or not a valid ISO 8601 duration in payment",
-          });
-        }
-
-        if (
-          !payment.tags ||
-          !Array.isArray(payment.tags) ||
-          payment.tags.length === 0
-        ) {
-          result.push({
-            valid: false,
-            code: 20006,
-            description: "Tags is missing, not an array, or empty in payload",
-          });
-        }
-
-        // Params Object Checks
-        if (payment.params) {
-          if (
-            !payment.params.currency ||
-            !/^[A-Z]{3}$/.test(payment.params.currency)
-          ) {
-            result.push({
-              valid: false,
-              code: 20006,
-              description:
-                "Currency is missing or not a valid ISO 4217 code in params",
-            });
-          }
-
-          if (
-            !payment.params.transaction_id ||
-            typeof payment.params.transaction_id !== "string" ||
-            payment.params.transaction_id === ""
-          ) {
-            result.push({
-              valid: false,
-              code: 20006,
-              description:
-                "Transaction_id is missing, not a string, or empty in payment.params",
-            });
-          }
-
-          if (
-            !payment.params.amount ||
-            !/^\d*\.\d{2}$/.test(payment.params.amount)
-          ) {
-            result.push({
-              valid: false,
-              code: 20006,
-              description:
-                "Amount is missing or not a valid decimal number in payment.params",
-            });
-          }
-        }
-
-        // Tags Array Checks
-        if (payment.tags && Array.isArray(payment.tags)) {
-          payment.tags.forEach((tag: any, index: number) => {
-            if (!tag.code || tag.code !== "bpp_collect") {
-              result.push({
-                valid: false,
-                code: 20006,
-                description: `payment.tag[${index}].code is missing or not equal to 'bpp_collect'`,
-              });
-            }
-
-            if (
-              !tag.list ||
-              !Array.isArray(tag.list) ||
-              tag.list.length === 0
-            ) {
-              result.push({
-                valid: false,
-                code: 20006,
-                description: `payment.tag[${index}].list is missing, not an array, or empty`,
-              });
-            }
-
-            if (tag.list && Array.isArray(tag.list)) {
-              const codes = new Set();
-              tag.list.forEach((item: any, itemIndex: number) => {
-                if (!item.code || !["success", "error"].includes(item.code)) {
-                  result.push({
-                    valid: false,
-                    code: 20006,
-                    description: `payment.tag[${index}].list[${itemIndex}].code is missing or not 'success' or 'error'`,
-                  });
-                }
-
-                if (item.code && codes.has(item.code)) {
-                  result.push({
-                    valid: false,
-                    code: 20006,
-                    description: `payment.tag[${index}].list[${itemIndex}].code is a duplicate in the list`,
-                  });
-                } else if (item.code) {
-                  codes.add(item.code);
-                }
-
-                if (!item.value || typeof item.value !== "string") {
-                  result.push({
-                    valid: false,
-                    code: 20006,
-                    description: `payment.tag[${index}].list[${itemIndex}].value is missing or not a string`,
-                  });
-                } else if (item.code === "success" && item.value !== "Y") {
-                  result.push({
-                    valid: false,
-                    code: 20006,
-                    description: `payment.tag[${index}].list[${itemIndex}].value must be 'Y' for code 'success'`,
-                  });
-                } else if (
-                  item.code === "error" &&
-                  (item.value === "" || item.value === "..")
-                ) {
-                  result.push({
-                    valid: false,
-                    code: 20006,
-                    description: `payment.tag[${index}].list[${itemIndex}].value is empty or invalid for code 'error'`,
-                  });
-                }
-              });
-            }
-          });
-        }
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking payment object in /${constants.ON_INIT}, ${error.stack}`
-      );
     }
+  } catch (err: any) {
+    addError(result, 20087, `Error validating tags: ${err.message}`);
+  }
+};
 
-    // Check quote object
-    try {
-      console.info(
-        `Checking Quote Object in /${constants.ON_SELECT} and /${constants.ON_INIT}`
-      );
-      const on_select_quoteRaw = await RedisService.getKey(
-        `${transaction_id}_quoteObj`
-      );
+const onInit = async (data: any) => {
+  const { context, message } = data;
+  const result: any[] = [];
+  const txnId = context?.transaction_id;
+  const flow = "2";
 
-      const on_select_quote = on_select_quoteRaw
-        ? JSON.parse(on_select_quoteRaw)
-        : null;
-
-      if (on_select_quote) {
-        const quoteErrors = compareQuoteObjects(
-          on_select_quote,
-          on_init.quote,
-          constants.ON_SELECT,
-          constants.ON_INIT
-        );
-        if (quoteErrors) {
-          for (const error of quoteErrors) {
-            result.push({
-              valid: false,
-              code: 20000,
-              description: `${error}`,
-            });
-          }
-        }
-      }
-
-      const hasItemWithQuantity = _.some(on_init.quote.breakup, (item) =>
-        _.has(item, "item.quantity")
-      );
-      if (hasItemWithQuantity) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `Extra attribute Quantity provided in quote object i.e not supposed to be provided after on_select so invalid quote object`,
-        });
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while checking quote object in /${constants.ON_SELECT} and /${constants.ON_INIT}, ${error.stack}`
-      );
-    }
-
-    // Check transaction_id and payment status
-    try {
-      console.info(
-        `Checking if transaction_id is present in message.order.payment`
-      );
-      const payment = on_init.payment;
-      const status = payment_status(payment, flow);
-      if (!status) {
-        result.push({
-          valid: false,
-          code: 20000,
-          description: `Transaction_id missing in message/order/payment`,
-        });
-      } else if (status.message) {
-        console.error(status.message);
-        result.push({
-          valid: false,
-          code: 20000,
-          description: status.message,
-        });
-      } else {
-        console.info("Payment status is valid.");
-      }
-    } catch (error: any) {
-      console.error(
-        `!!Error while handling payment status in /${constants.ON_INIT}, ${error.stack}`
-      );
-      result.push({
-        valid: false,
-        code: 20000,
-        description: "Payment status cannot be paid (COD flow)",
-      });
-    }
-
-    return result;
-  } catch (error: any) {
-    console.error(
-      `!!Some error occurred while checking /${constants.ON_INIT} API, ${error.stack}`
-    );
+  try {
+    await contextChecker(context, result, constants.ON_INIT, constants.INIT);
+  } catch (err: any) {
     result.push({
       valid: false,
       code: 20000,
-      description: `Unexpected error in /${constants.ON_INIT}`,
+      description: err.message,
     });
+    return result;
+  }
+
+  try {
+    const order = message.order;
+
+    await RedisService.setKey(
+      `${txnId}_${ApiSequence.ON_INIT}`,
+      JSON.stringify(data),
+      TTL_IN_SECONDS
+    );
+
+    await validateProvider(txnId, order.provider, result);
+    await validateItems(txnId, order.items, context, result);
+    await validateFulfillments(txnId, order.fulfillments, result);
+    await validateBilling(txnId, order.billing, context, result);
+    await validateQuote(txnId, order.quote, context, result);
+    await validatePayment(txnId, order.payment, context, flow, result);
+    await validateTags(txnId, order.tags, result);
+
+    await storeBilling(txnId, order.billing, result);
+    await storeQuote(txnId, order.quote, result);
+    await storePayment(txnId, order.payment, result);
+
+    return result;
+  } catch (err: any) {
+    console.error(
+      `!!Some error occurred while checking /${constants.ON_INIT} API, ${err.stack}`
+    );
     return result;
   }
 };

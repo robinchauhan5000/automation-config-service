@@ -4,93 +4,59 @@ import { ApiSequence } from "../../utils/constants";
 import { checkUpdate } from "./update";
 import { checkOnUpdate } from "./on_update";
 
-// Interface for validation errors
 interface ValidationError {
   valid: boolean;
   code: number;
   description: string;
 }
 
-// Helper to create validation errors
 const addError = (code: number, description: string): ValidationError => ({
   valid: false,
   code,
-  description
+  description,
 });
 
-// Helper to fetch and parse Redis set
-async function fetchRedisSet(transaction_id: string, key: string): Promise<Set<any>> {
+async function fetchRedisSet(
+  transaction_id: string,
+  key: string
+): Promise<Set<any>> {
   try {
     const rawData = await RedisService.getKey(`${transaction_id}_${key}`);
     return new Set(rawData ? JSON.parse(rawData) : []);
   } catch (error: any) {
-    console.error(`Error fetching Redis key ${transaction_id}_${key}: ${error.stack}`);
+    console.error(
+      `Error fetching Redis key ${transaction_id}_${key}: ${error.stack}`
+    );
     return new Set();
   }
 }
 
 export const updateRouter = async (data: any) => {
   const transaction_id = data.context.transaction_id;
-  let apiSeq = "";
-  let flow = "";
+  let apiSeq = "update";
   let result: any = [];
 
   // Fetch settlement details set
-  let settlementDetatilSet = await fetchRedisSet(transaction_id, "settlementDetatilSet");
+  let settlementDetailSet = await fetchRedisSet(
+    transaction_id,
+    "settlementDetailSet"
+  );
 
   const updateTarget = data?.message?.update_target;
   if (updateTarget) {
     if (updateTarget === "payment") {
-      const fulfillments = data.message?.order?.fulfillments;
-      const fulfillment = fulfillments[0];
-      if (fulfillment.type === "Cancel") {
-        apiSeq = ApiSequence.UPDATE_SETTLEMENT_PART_CANCEL;
-        flow = "6-a";
-      } else if (fulfillment.type === "Return") {
-        apiSeq = ApiSequence.UPDATE_SETTLEMENT_LIQUIDATED;
-        flow = "6-a";
-      } else {
-        result = [addError(400, "Invalid update fulfillment.type")];
-      }
+      result = await checkUpdate(data, settlementDetailSet, apiSeq, "payment");
     } else if (updateTarget === "item") {
-      flow = "6-c";
-      apiSeq = ApiSequence.UPDATE_LIQUIDATED;
+      result = await checkUpdate(data, settlementDetailSet, "update", "item");
     } else {
-      result = [addError(400, "Invalid action call, update_target is not correct")];
+      result = [
+        addError(400, "Invalid action call, update_target is not correct"),
+      ];
     }
   } else {
     result = [addError(400, "Invalid action call, update_target is misisng")];
   }
 
-  switch (apiSeq) {
-    case ApiSequence.UPDATE_SETTLEMENT_PART_CANCEL:
-      result = await checkUpdate(
-        data,
-        ApiSequence.UPDATE_SETTLEMENT_PART_CANCEL,
-        settlementDetatilSet,
-        flow
-      );
-      break;
-    case ApiSequence.UPDATE_LIQUIDATED:
-      result = await checkUpdate(
-        data,
-        ApiSequence.UPDATE_LIQUIDATED,
-        settlementDetatilSet,
-        flow
-      );
-      break;
-    case ApiSequence.UPDATE_SETTLEMENT_LIQUIDATED:
-      result = await checkUpdate(
-        data,
-        ApiSequence.UPDATE_SETTLEMENT_LIQUIDATED,
-        settlementDetatilSet,
-        flow
-      );
-      break;
-    default:
-      result = [addError(400, "Invalid update action call")];
-      break;
-  }
   return result;
 };
 
@@ -101,11 +67,12 @@ export const onUpdateRouter = async (data: any) => {
   let flow = "";
 
   // Fetch Redis sets concurrently
-  const [fulfillmentsItemsSet, settlementDetatilSet, quoteTrailItemsSet] = await Promise.all([
-    fetchRedisSet(transaction_id, "fulfillmentsItemsSet"),
-    fetchRedisSet(transaction_id, "settlementDetatilSet"),
-    fetchRedisSet(transaction_id, "quoteTrailItemsSet")
-  ]);
+  const [fulfillmentsItemsSet, settlementDetailSet, quoteTrailItemsSet] =
+    await Promise.all([
+      fetchRedisSet(transaction_id, "fulfillmentsItemsSet"),
+      fetchRedisSet(transaction_id, "settlementDetailSet"),
+      fetchRedisSet(transaction_id, "quoteTrailItemsSet"),
+    ]);
 
   const fulfillments = data.message?.order?.fulfillments;
   const length = fulfillments?.length;
@@ -121,16 +88,23 @@ export const onUpdateRouter = async (data: any) => {
     flow = "6-a";
   } else {
     const fulfillmentState = fulfillmentObj.state?.descriptor?.code;
-    flow = "6-c";
+    flow = "6-b";
     switch (fulfillmentState) {
       case "Return_Initiated":
-        apiSeq = ApiSequence.ON_UPDATE_INTERIM_LIQUIDATED;
+        apiSeq = ApiSequence.ON_UPDATE_INTERIM;
         break;
-      case "Liquidated":
-        apiSeq = ApiSequence.ON_UPDATE_LIQUIDATED;
+      case "Return_Approved":
+        apiSeq = ApiSequence.ON_UPDATE_APPROVAL;
+        break;
+      case "Return_Picked":
+        apiSeq = ApiSequence.ON_UPDATE_PICKED;
+        break;
+      case "Return_Delivered":
+        apiSeq = ApiSequence.ON_UPDATE_DELIVERED;
         break;
       default:
-        result = [addError(400, `Invalid on_update state: ${fulfillmentState}`)];
+        flow = "6";
+        apiSeq = ApiSequence.ON_UPDATE;
         break;
     }
   }
@@ -139,7 +113,7 @@ export const onUpdateRouter = async (data: any) => {
     result = await checkOnUpdate(
       data,
       apiSeq,
-      settlementDetatilSet,
+      settlementDetailSet,
       quoteTrailItemsSet,
       fulfillmentsItemsSet,
       flow,

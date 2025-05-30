@@ -1,24 +1,22 @@
-import {
-  search,
-  onSearch,
-  select,
-  onSelect,
-  init,
-  onInit,
-  confirm,
-  onConfirm,
-  onStatusRouter,
-  cancel,
-  onCancelRouter,
-} from "../L1-custom-validations/apiTests/index";
+import { cancel } from "./apiTests/cancel";
+import confirm from "./apiTests/confirm";
+import init from "./apiTests/init";
+import { onCancelRouter } from "./apiTests/on_cancel";
+import on_confirm from "./apiTests/on_confirm";
+import onInit from "./apiTests/on_init";
+import { onSearch } from "./apiTests/on_search";
+import { onSelect } from "./apiTests/on_select";
+import { onStatus } from "./apiTests/on_status/on_status";
+import { search } from "./apiTests/search";
+import { select } from "./apiTests/select";
 import { onUpdateRouter, updateRouter } from "./apiTests/update";
 import { validationOutput } from "./types";
 
 export async function performL1CustomValidations(
   payload: any,
   action: string,
-  _allErrors = false,
-  _externalData = {}
+  allErrors = false,
+  externalData = {}
 ): Promise<validationOutput> {
   console.log("Performing custom L1 validations for action: " + action);
   let result: any = [];
@@ -28,6 +26,7 @@ export async function performL1CustomValidations(
       break;
     case "on_search":
       result = await onSearch(payload);
+      console.log('Result from on_search:', result);
       break;
     case "select":
       result = await select(payload);
@@ -45,10 +44,10 @@ export async function performL1CustomValidations(
       result = await confirm(payload);
       break;
     case "on_confirm":
-      result = await onConfirm(payload);
+      result = await on_confirm(payload);
       break;
     case "on_status":
-      result = await onStatusRouter(payload);
+      result = await onStatus(payload);
       break;
     case "cancel":
       result = await cancel(payload);

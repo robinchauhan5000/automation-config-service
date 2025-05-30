@@ -245,7 +245,7 @@ export const addActionToRedisSet = async (
 ): Promise<boolean> => {
   try {
     const key = `${transactionId}_previousCall`;
-    let existingSet: string[] = [];
+    let existingSet: any = [];
 
     const existing = await RedisService.getKey(key);
     if (existing) {
@@ -256,7 +256,7 @@ export const addActionToRedisSet = async (
       previousAction === presentAction ||
       (!_.isEmpty(existingSet) && existingSet.includes(previousAction))
     ) {
-      existingSet.push(presentAction);
+      existingSet?.push(presentAction);
       await RedisService.setKey(
         key,
         JSON.stringify(existingSet),
@@ -532,22 +532,28 @@ export function checkIdInUri(Uri: string, id: string): boolean {
 export function validateBapUri(
   bapUri: string,
   bapId: string,
-  result: ValidationOutput,
-  addError: (code: number, description: string) => void
+  result: ValidationOutput
 ): void {
   if (!checkIdInUri(bapUri, bapId)) {
-    addError(20006, `Bap_id ${bapId} is not found in BapUri ${bapUri}`);
+    result.push({
+      valid: false,
+      code: 20006,
+      description: `Bap_id ${bapId} is not found in BapUri ${bapUri}`,
+    });
   }
 }
 
 export function validateBppUri(
   bppUri: string,
   bppId: string,
-  result: ValidationOutput,
-  addError: (code: number, description: string) => void
+  result: ValidationOutput
 ): void {
   if (!checkIdInUri(bppUri, bppId)) {
-    addError(20006, `Bpp_id ${bppId} is not found in BppUri ${bppUri}`);
+    result.push({
+      valid: false,
+      code: 20006,
+      description: `Bpp_id ${bppId} is not found in BppUri ${bppUri}`,
+    });
   }
 }
 
@@ -783,34 +789,35 @@ export function compareObjects(
 ): string[] {
   const errors: string[] = [];
 
-  // Check if obj1 or obj2 is undefined or null
-  if (
-    obj1 === null ||
-    obj1 === undefined ||
-    obj2 === null ||
-    obj2 === undefined
-  ) {
+  if (obj1 == null || obj2 == null) {
     errors.push("One of the objects is undefined or null");
     return errors;
   }
 
-  const keys1 = Object.keys(obj1);
-  const keys2 = Object.keys(obj2);
+  const keys1 = Object.keys(obj1 ?? {});
+  const keys2 = Object.keys(obj2 ?? {});
 
-  // Check for key length mismatch
-  if (keys1.length !== keys2.length) {
+  if (keys1?.length !== keys2?.length) {
     errors.push(`Key length mismatch for ${parentKey || "root"}`);
-    return errors; // Stop comparing if key length mismatch is detected
+    return errors;
   }
 
-  for (const key of keys1) {
+  for (const key of keys1 ?? []) {
     const fullKey = parentKey ? `${parentKey}.${key}` : key;
+    const val1 = obj1?.[key];
+    const val2 = obj2?.[key];
 
-    if (typeof obj1[key] === "object" && typeof obj2[key] === "object") {
-      const nestedErrors = compareObjects(obj1[key], obj2[key], fullKey);
+    const areObjects =
+      typeof val1 === "object" &&
+      val1 !== null &&
+      typeof val2 === "object" &&
+      val2 !== null;
+
+    if (areObjects) {
+      const nestedErrors = compareObjects(val1, val2, fullKey);
       errors.push(...nestedErrors);
-    } else if (obj1[key] !== obj2[key]) {
-      errors.push(`Key '${fullKey}' mismatch: ${obj1[key]} !== ${obj2[key]}`);
+    } else if (val1 !== val2) {
+      errors.push(`Key '${fullKey}' mismatch: ${val1} !== ${val2}`);
     }
   }
 
@@ -900,20 +907,6 @@ export function isTagsValid(tags: any[], entity: string): boolean {
 
   return false;
 }
-export const payment_status = (payment: any, flow: string) => {
-  const errorObj: any = {};
-  if (flow === FLOW.FLOW2A && payment.status === PAYMENT_STATUS.PAID) {
-    errorObj.message = `Cannot be ${payment.status} for ${FLOW.FLOW2A} flow (Cash on Delivery)`;
-    return errorObj;
-  }
-  if (payment.status === PAYMENT_STATUS.PAID) {
-    if (!payment.params.transaction_id) {
-      return false;
-    }
-  }
-
-  return true;
-};
 
 export const sumQuoteBreakUp = (quote: any) => {
   const totalPrice = Number(quote.price.value);
@@ -1267,6 +1260,7 @@ export const checkQuoteTrailSum = (
   quoteTrailSum = Math.abs(Number(quoteTrailSum.toFixed(2)));
   const totalPrice = Number((price + quoteTrailSum).toFixed(2));
   const confirmPrice = Number(priceAtConfirm.toFixed(2));
+  console.log("12345", price, quoteTrailSum, confirmPrice);
 
   if (totalPrice !== confirmPrice) {
     const description = `quote_trail price and item quote price sum (${totalPrice}) for ${apiSeq} should equal the price in ${constants.ON_CONFIRM} (${confirmPrice})`;
@@ -1320,3 +1314,54 @@ export async function lookupSubscriber(
     throw error;
   }
 }
+export function isPresentInRedisSet(set1: any, obj: any) {
+  try {
+    let exists = false;
+    for (const item of set1) {
+      if (JSON.stringify(item) === JSON.stringify(obj)) {
+        exists = true;
+        break;
+      }
+    }
+    return exists;
+  } catch (err: any) {
+    console.error("Error in isPresentInRedisSet:", err);
+  }
+}
+export const payment_status = (payment: any, flow: string) => {
+  const errorObj: any = {};
+  if (flow === FLOW.FLOW2A && payment.status === PAYMENT_STATUS.PAID) {
+    errorObj.message = `Cannot be ${payment.status} for ${FLOW.FLOW2A} flow (Cash on Delivery)`;
+    return errorObj;
+  }
+  if (payment.status === PAYMENT_STATUS.PAID) {
+    if (!payment.params.transaction_id) {
+      return false;
+    }
+  }
+
+  return true;
+};
+export const setRedisValue = async (
+  key: string,
+  value: any,
+  ttlInSeconds: number = TTL_IN_SECONDS
+): Promise<boolean> => {
+  try {
+    await RedisService.setKey(key, JSON.stringify(value), ttlInSeconds);
+    return true;
+  } catch (err) {
+    console.error(`Failed to set key '${key}':`, err);
+    return false;
+  }
+};
+
+export const getRedisValue = async (key: string): Promise<any | null> => {
+  try {
+    const data = await RedisService.getKey(key);
+    return data ? JSON.parse(data) : null;
+  } catch (err) {
+    console.error(`Failed to get key '${key}':`, err);
+    return null;
+  }
+};
