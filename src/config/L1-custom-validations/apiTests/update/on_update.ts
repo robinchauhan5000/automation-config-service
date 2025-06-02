@@ -1,17 +1,19 @@
 import _, { isEmpty } from "lodash";
 import { RedisService } from "ondc-automation-cache-lib";
-import constants, { ApiSequence } from "../../utils/constants";
+import constants, { ApiSequence } from "../../utils//constants";
 import {
   sumQuoteBreakUp,
   checkQuoteTrailSum,
   timeDiff,
   isPresentInRedisSet,
-} from "../../utils/helper";
+  setRedisValue,
+  addActionToRedisSet,
+} from "../../utils//helper";
 import {
   partcancel_return_reasonCodes,
   return_request_reasonCodes,
-} from "../../utils/reasonCode";
-import { contextChecker } from "../../utils/contextUtils";
+} from "../../utils//reasonCode";
+import { contextChecker } from "../../utils//contextUtils";
 
 const TTL_IN_SECONDS: number = Number(process.env.TTL_IN_SECONDS) || 3600;
 
@@ -56,13 +58,25 @@ export const checkOnUpdate = async (
   const { message, context }: any = data;
   try {
     try {
-      await contextChecker(
-        context,
-        result,
-        constants.ON_UPDATE,
-        constants.ON_CONFIRM,
-        true
-      );
+      await contextChecker(context, result, apiSeq, constants.ON_CONFIRM, true);
+      if (
+        apiSeq === ApiSequence.ON_UPDATE_APPROVAL ||
+        apiSeq === ApiSequence.ON_UPDATE_INTERIM
+      ) {
+        try {
+          await RedisService.setKey(
+            `${context.transaction_id}_PreviousUpdatedTimestamp`,
+            JSON.stringify(message.order.updated_at),
+            TTL_IN_SECONDS
+          );
+        } catch (error: any) {
+          result.push({
+            valid: false,
+            code: 20001,
+            description: `Error storing order details: ${error.message}`,
+          });
+        }
+      }
     } catch (err: any) {
       result.push(addError(`Error checking context: ${err.message}`, 20000));
 
@@ -74,8 +88,6 @@ export const checkOnUpdate = async (
     // Validate quote breakup
     try {
       console.info(`Checking for valid quote breakup prices for /${apiSeq}`);
-      console.log("on_update.quote", on_update.quote);
-      
       if (!sumQuoteBreakUp(on_update.quote)) {
         result.push({
           valid: false,
@@ -532,6 +544,7 @@ export const checkOnUpdate = async (
     }
 
     // Check fulfillment id, type, and tracking
+    const fulfillmentIdArray: string[] = [];
     try {
       console.info("Checking fulfillment.id, fulfillment.type and tracking");
       on_update.fulfillments.forEach(async (ff: any) => {
@@ -542,6 +555,7 @@ export const checkOnUpdate = async (
             description: `Fulfillment Id must be present`,
           });
         }
+        fulfillmentIdArray.push(ff.id);
         if (!ff.type) {
           result.push({
             valid: false,
@@ -575,6 +589,11 @@ export const checkOnUpdate = async (
           }
         }
       });
+
+      await setRedisValue(
+        `${context.transaction_id}_fulfillmentIdArray`,
+        fulfillmentIdArray
+      );
     } catch (error: any) {
       console.error(
         `Error while checking fulfillments id, type and tracking in /${constants.ON_STATUS}`
@@ -609,6 +628,45 @@ export const checkOnUpdate = async (
 
     // Flow 6-b checks
     if (flow === "6-b") {
+      const isReplaceable = await RedisService.getKey(
+        `${data.context.transaction_id}_replaceable`
+      );
+      if (isReplaceable) {
+        on_update.fulfillments.forEach(async (ff: any) => {
+          if (ff.type === "Return") {
+            // Check for replace_request tag
+            const replaceRequestTag = ff.tags?.find(
+              (tag: any) => tag.code === "replace_request"
+            );
+            if (!replaceRequestTag) {
+              result.push({
+                valid: false,
+                code: 20006,
+                description: `Missing 'replace_request' tag in Return fulfillment for ${apiSeq}`,
+              });
+            } else {
+              // Check if the replace_request tag has the correct structure
+              const replaceIdItem = replaceRequestTag.list?.find(
+                (item: any) => item.code === "id"
+              );
+              if (!replaceIdItem || !replaceIdItem.value) {
+                result.push({
+                  valid: false,
+                  code: 20006,
+                  description: `Invalid 'replace_request' tag structure in Return fulfillment for ${apiSeq}. Missing 'id' with a value.`,
+                });
+              } else {
+                await RedisService.setKey(
+                  `${data.context.transaction_id}_replaceId`,
+                  replaceIdItem.value,
+                  TTL_IN_SECONDS
+                );
+              }
+            }
+          }
+        });
+      }
+
       if (
         apiSeq === ApiSequence.ON_UPDATE_APPROVAL ||
         apiSeq === ApiSequence.ON_UPDATE_PICKED ||
@@ -840,6 +898,163 @@ export const checkOnUpdate = async (
             description: `Error checking Return object in /${apiSeq}: ${error.message}`,
           });
         }
+        if (apiSeq !== ApiSequence.ON_UPDATE_APPROVAL) {
+          try {
+            const isReplaceable = await RedisService.getKey(
+              `${data.context.transaction_id}_replaceable`
+            );
+            if (isReplaceable) {
+              const replaceId = await RedisService.getKey(
+                `${data.context.transaction_id}_replaceId`
+              );
+              if (replaceId) {
+                fulfillmentsItemsSet.has;
+                const deliveryObj = on_update.fulfillments.find((ff: any) => {
+                  return ff.type == "Delivery" && ff.id === replaceId;
+                });
+
+                if (deliveryObj) {
+                  const [buyerGpsRaw, buyerAddrRaw] = await Promise.all([
+                    getRedisValue(context.transaction_id, "buyerGps"),
+                    getRedisValue(context.transaction_id, "buyerAddr"),
+                  ]);
+
+                  const buyerGps = buyerGpsRaw;
+                  const buyerAddr = buyerAddrRaw;
+
+                  const gpsRegex = /^-?\d{1,3}\.\d+,-?\d{1,3}\.\d+$/;
+
+                  for (const [
+                    i,
+                    fulfillment,
+                  ] of on_update.fulfillments.entries()) {
+                    if (fulfillment.type !== "Delivery") continue;
+
+                    try {
+                      const id = fulfillment.id;
+                      if (!fulfillment["@ondc/org/TAT"]) {
+                        result.push({
+                          valid: false,
+                          code: 20006,
+                          description: `'TAT' must be provided in message/order/fulfillments[${id}]`,
+                        });
+                      }
+
+                      const gps = fulfillment.end?.location?.gps;
+                      if (!gpsRegex.test(gps)) {
+                        result.push({
+                          valid: false,
+                          code: 20006,
+                          description: `fulfillments[${i}].end.location.gps has invalid format in /${constants.ON_CONFIRM}`,
+                        });
+                      } else if (buyerGps && !_.isEqual(gps, buyerGps)) {
+                        result.push({
+                          valid: false,
+                          code: 20007,
+                          description: `gps coordinates in fulfillments[${i}].end.location mismatch in /${constants.SELECT} & /${constants.ON_CONFIRM}`,
+                        });
+                      }
+
+                      const areaCode =
+                        fulfillment.end?.location?.address?.area_code;
+                      if (buyerAddr && !_.isEqual(areaCode, buyerAddr)) {
+                        result.push({
+                          valid: false,
+                          code: 20006,
+                          description: `address.area_code in fulfillments[${i}].end.location mismatch in /${constants.SELECT} & /${constants.ON_CONFIRM}`,
+                        });
+                      }
+
+                      const address = fulfillment.end?.location?.address;
+                      const providerAddress = fulfillment.start;
+                      if (
+                        providerAddress &&
+                        !_.isEqual(providerAddress, address)
+                      ) {
+                        try {
+                          await setRedisValue(
+                            `${context.transaction_id}_providerAddr`,
+                            providerAddress,
+                            TTL_IN_SECONDS
+                          );
+                        } catch (error: any) {
+                          result.push({
+                            valid: false,
+                            code: 23001,
+                            description: `Error setting provider address in Redis for /${constants.ON_CONFIRM}: ${error.message}`,
+                          });
+                        }
+                      }
+
+                      if (address) {
+                        const lenName = address.name?.length || 0;
+                        const lenBuilding = address.building?.length || 0;
+                        const lenLocality = address.locality?.length || 0;
+
+                        if (lenName + lenBuilding + lenLocality >= 190) {
+                          result.push({
+                            valid: false,
+                            code: 20006,
+                            description: `address.name + address.building + address.locality should be < 190 chars in fulfillments[${i}]`,
+                          });
+                        }
+
+                        if (lenBuilding <= 3) {
+                          result.push({
+                            valid: false,
+                            code: 20006,
+                            description: `address.building should be > 3 chars in fulfillments[${i}]`,
+                          });
+                        }
+                        if (lenName <= 3) {
+                          result.push({
+                            valid: false,
+                            code: 20006,
+                            description: `address.name should be > 3 chars in fulfillments[${i}]`,
+                          });
+                        }
+                        if (lenLocality <= 3) {
+                          result.push({
+                            valid: false,
+                            code: 20006,
+                            description: `address.locality should be > 3 chars in fulfillments[${i}]`,
+                          });
+                        }
+
+                        if (
+                          address.building === address.locality ||
+                          address.name === address.building ||
+                          address.name === address.locality
+                        ) {
+                          result.push({
+                            valid: false,
+                            code: 20006,
+                            description: `address.name, address.building, and address.locality should be unique in fulfillments[${i}]`,
+                          });
+                        }
+                      }
+                    } catch (error: any) {
+                      result.push({
+                        valid: false,
+                        code: 23001,
+                        description: `Error checking fulfillment in /${constants.ON_CONFIRM}: ${error.message}`,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          } catch (error: any) {
+            console.error(
+              `Error while checking replaceable status in /${apiSeq}, ${error.stack}`
+            );
+            result.push({
+              valid: false,
+              code: 23001,
+              description: `Error checking replaceable status in /${apiSeq}: ${error.message}`,
+            });
+          }
+        }
       }
 
       // Check quote trail sum for 6-b
@@ -946,7 +1161,6 @@ export const checkOnUpdate = async (
           description: `Error checking quote trail items in /${apiSeq}: ${error.message}`,
         });
       }
-
       // Reason_id mapping for return_request in 6-b
       try {
         console.info(`Reason_id mapping for return_request`);

@@ -1,9 +1,9 @@
-import _, { isEmpty, update } from "lodash";
+import _ from "lodash";
 import { RedisService } from "ondc-automation-cache-lib";
-import constants from "../../utils/constants";
-import { isPresentInRedisSet } from "../../utils/helper";
-import { return_request_reasonCodes } from "../../utils/constants/reasonCode";
-import { contextChecker } from "../../utils/contextUtils";
+import constants from "../../utils//constants";
+import { isPresentInRedisSet } from "../../utils//helper";
+import { return_request_reasonCodes } from "../../utils//constants/reasonCode";
+import { contextChecker } from "../../utils//contextUtils";
 
 const TTL_IN_SECONDS: number = Number(process.env.TTL_IN_SECONDS) || 3600;
 
@@ -134,6 +134,7 @@ export const checkUpdate = async (
       try {
         console.info(`Checking for return_request object in /${apiSeq}`);
         let return_request_obj = null;
+        let isReplace = false;
         update.fulfillments.forEach((item: any) => {
           item.tags?.forEach(async (tag: any) => {
             if (tag.code === "return_request") {
@@ -300,6 +301,16 @@ export const checkUpdate = async (
                       `Error parsing ttl_reverseqc duration in ${apiSeq}`,
                       ERROR_CODES.INVALID_RETURN_REQUEST
                     )
+                  );
+                }
+              }
+              if (fields.replace) {
+                if (fields.replace == "yes") {
+                  isReplace = true;
+                  await RedisService.setKey(
+                    `${context.transaction_id}_replaceable`,
+                    "true",
+                    TTL_IN_SECONDS
                   );
                 }
               }

@@ -1,15 +1,22 @@
-import { cancel } from "./apiTests/cancel";
-import confirm from "./apiTests/confirm";
-import init from "./apiTests/init";
-import { onCancelRouter } from "./apiTests/on_cancel";
-import on_confirm from "./apiTests/on_confirm";
-import onInit from "./apiTests/on_init";
-import { onSearch } from "./apiTests/on_search";
-import { onSelect } from "./apiTests/on_select";
-import { onStatus } from "./apiTests/on_status/on_status";
-import { search } from "./apiTests/search";
-import { select } from "./apiTests/select";
-import { onUpdateRouter, updateRouter } from "./apiTests/update";
+import {
+  cancel,
+  confirm,
+  init,
+  onCancelRouter,
+  on_confirm,
+  onInit,
+  onSearch,
+  onSelect,
+  onStatusRouter,
+  search,
+  select,
+  checkStatus,
+  track,
+  on_track,
+  onUpdateRouter,
+  updateRouter,
+} from "./apiTests";
+
 import { validationOutput } from "./types";
 
 export async function performL1CustomValidations(
@@ -26,7 +33,6 @@ export async function performL1CustomValidations(
       break;
     case "on_search":
       result = await onSearch(payload);
-      console.log('Result from on_search:', result);
       break;
     case "select":
       result = await select(payload);
@@ -46,8 +52,17 @@ export async function performL1CustomValidations(
     case "on_confirm":
       result = await on_confirm(payload);
       break;
+    case "status":
+      result = await checkStatus(payload);
+      break;
     case "on_status":
-      result = await onStatus(payload);
+      result = await onStatusRouter(payload);
+      break;
+    case "track":
+      result = await track(payload);
+      break;
+    case "on_track":
+      result = await on_track(payload);
       break;
     case "cancel":
       result = await cancel(payload);

@@ -1,6 +1,6 @@
 import { RedisService } from "ondc-automation-cache-lib";
 import _ from "lodash";
-import { ApiSequence } from "../../utils/constants";
+import { ApiSequence } from "../../utils//constants";
 import { checkUpdate } from "./update";
 import { checkOnUpdate } from "./on_update";
 
@@ -81,7 +81,13 @@ export const onUpdateRouter = async (data: any) => {
     return [addError(400, "Fulfillments are missing or empty")];
   }
 
-  const fulfillmentObj = fulfillments[length - 1];
+  let fulfillmentObj = fulfillments[length - 1];
+  const returnRequestObj = fulfillments.find((f: any) => f.type === "Return");
+
+  if (returnRequestObj) {
+    fulfillmentObj = returnRequestObj;
+  }
+
   const fulfillmentType = fulfillmentObj.type;
   if (fulfillmentType === "Cancel") {
     apiSeq = ApiSequence.ON_UPDATE_PART_CANCEL;

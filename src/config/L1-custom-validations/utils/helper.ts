@@ -413,9 +413,8 @@ export const checkMandatoryTags = (
         `Origin tag fields are missing for ${categoryName} item[${index}]`
       );
       const key = `missingOriginTag[${i}][${index}]`;
-      errorObj[
-        key
-      ] = `Origin tag fields are missing for ${categoryName} item[${index}]`;
+      errorObj[key] =
+        `Origin tag fields are missing for ${categoryName} item[${index}]`;
     }
 
     if (!attributeTag && categoryName !== "Grocery") {
@@ -423,9 +422,8 @@ export const checkMandatoryTags = (
         `Attribute tag fields are missing for ${categoryName} item[${index}]`
       );
       const key = `missingAttributeTag[${i}][${index}]`;
-      errorObj[
-        key
-      ] = `Attribute tag fields are missing for ${categoryName} item[${index}]`;
+      errorObj[key] =
+        `Attribute tag fields are missing for ${categoryName} item[${index}]`;
       return;
     }
 
@@ -448,11 +446,10 @@ export const checkMandatoryTags = (
 
         if (missingMandatoryTags.length > 0) {
           const key = `invalid_attribute[${i}][${index}]`;
-          errorObj[
-            key
-          ] = `Invalid attribute for item with category id: ${missingMandatoryTags.join(
-            ", "
-          )}`;
+          errorObj[key] =
+            `Invalid attribute for item with category id: ${missingMandatoryTags.join(
+              ", "
+            )}`;
         } else {
           console.log(`All tag codes have corresponding valid attributes.`);
         }
@@ -476,9 +473,8 @@ export const checkMandatoryTags = (
                   `Mandatory tag field [${tagName.toLowerCase()}] missing for ${categoryName} item[${index}]`
                 );
                 const key = `missingTagsItem[${i}][${index}] : ${tagName.toLowerCase()}`;
-                errorObj[
-                  key
-                ] = `Mandatory tag field [${tagName.toLowerCase()}] missing for ${categoryName} item[${index}]`;
+                errorObj[key] =
+                  `Mandatory tag field [${tagName.toLowerCase()}] missing for ${categoryName} item[${index}]`;
               } else {
                 if (tagInfo.value.length > 0) {
                   let isValidValue = false;
@@ -503,9 +499,8 @@ export const checkMandatoryTags = (
                       `The item value can only be one of the possible values or match the regex pattern.`
                     );
                     const key = `InvldValueforItem[${i}][${index}] : ${tagName}`;
-                    errorObj[
-                      key
-                    ] = `Invalid item value: [${originalTag}]. It must be one of the allowed values or match the regex pattern [${regexPattern}].`;
+                    errorObj[key] =
+                      `Invalid item value: [${originalTag}]. It must be one of the allowed values or match the regex pattern [${regexPattern}].`;
                   }
                 }
               }
