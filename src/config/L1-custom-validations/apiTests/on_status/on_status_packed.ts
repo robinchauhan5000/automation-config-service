@@ -46,8 +46,6 @@ const addError = (description: string, code: number): ValidationError => ({
   description,
 });
 
-
-
 async function validateOrder(
   order: any,
   transaction_id: string,
@@ -708,6 +706,7 @@ async function validateTags(
     }
   }
 }
+
 async function validateItems(
   transactionId: any,
   items: any,
@@ -788,6 +787,7 @@ async function validateItems(
     return result;
   }
 }
+
 const checkOnStatusPacked = async (
   data: any,
   state: string,

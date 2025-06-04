@@ -24,8 +24,8 @@ const addError = (
 async function validateProviders(
   providers: any[],
   context: any,
-  result: ValidationError[],
-  isSearchIncr: any
+  result: ValidationError[], 
+  isSearchIncr : any
 ): Promise<{
   prvdrsId: Set<string>;
   itemsId: Set<string>;
@@ -161,27 +161,11 @@ async function validateProviders(
         }
       }
 
-      if (
-        !isSearchIncr &&
-        item.fulfillment_id &&
-        !onSearchFFIdsArray.has(item.fulfillment_id)
-      ) {
-        addError(
-          result,
-          20006,
-          `fulfillment_id in bpp/providers[${index}]/items[${itemIndex}] must map to a valid fulfillment id`
-        );
+      if (!isSearchIncr && item.fulfillment_id && !onSearchFFIdsArray.has(item.fulfillment_id)) {
+        addError(result, 20006, `fulfillment_id in bpp/providers[${index}]/items[${itemIndex}] must map to a valid fulfillment id`);
       }
-      if (
-        !isSearchIncr &&
-        item.location_id &&
-        !prvdrLocId.has(item.location_id)
-      ) {
-        addError(
-          result,
-          20006,
-          `location_id in bpp/providers[${index}]/items[${itemIndex}] must map to a valid location id`
-        );
+      if (!isSearchIncr && item.location_id && !prvdrLocId.has(item.location_id)) {
+        addError(result, 20006, `location_id in bpp/providers[${index}]/items[${itemIndex}] must map to a valid location id`);
       }
 
       if (item.time?.timestamp) {
@@ -551,9 +535,9 @@ export async function onSearch(data: any) {
   }
 
   try {
-    let isSearchIncr = false;
-    if (context.city === "*") isSearchIncr = true;
-
+    let isSearchIncr = false
+    if(context.city === "*") isSearchIncr = true
+     
     const {
       prvdrsId,
       itemsId,
@@ -562,13 +546,8 @@ export async function onSearch(data: any) {
       categoriesId,
       itemIdList,
       itemsArray,
-      itemCategoriesId,
-    } = await validateProviders(
-      message.catalog["bpp/providers"] || [],
-      context,
-      result,
-      isSearchIncr
-    );
+      itemCategoriesId
+    } = await validateProviders(message.catalog["bpp/providers"] || [], context, result, isSearchIncr);
 
     validateServiceabilityAndTiming(
       message.catalog["bpp/providers"] || [],

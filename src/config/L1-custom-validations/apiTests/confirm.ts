@@ -557,15 +557,16 @@ const validatePayment = async (
   result: ValidationError[]
 ): Promise<void> => {
   try {
-    const quotePrice = parseFloat(quote.price.value);
-    if (parseFloat(payment.params.amount) !== quotePrice) {
-      addError(
-        result,
-        20006,
-        `Invalid response: Payment amount ${payment.params.amount} does not match quote price ${quotePrice} in /${constants.CONFIRM}`
-      );
+    if (payment.type === "ON-ORDER") {
+      const quotePrice = parseFloat(quote.price.value);
+      if (parseFloat(payment.params.amount) !== quotePrice) {
+        addError(
+          result,
+          20006,
+          `Invalid response: Payment amount ${payment.params.amount} does not match quote price ${quotePrice} in /${constants.CONFIRM}`
+        );
+      }
     }
-
     const buyerFF = await getRedisValue(`${txnId}_buyerFFAmount`);
     if (
       buyerFF &&
@@ -638,7 +639,6 @@ const validatePayment = async (
           missingFields.push("settlement_bank_account_no");
         }
       }
-
       if (payment.collected_by === "BAP") {
         if (!payment.type || payment.type !== "ON-ORDER") {
           addError(
@@ -694,55 +694,13 @@ const validatePayment = async (
             );
           }
         }
-      }
-
-      if (payment.type === "ON-FULFILLMENT") {
-        if (!payment.status || payment.status === "NOT_PAID") {
+      } else if (payment.type === "ON-FULFILLMENT") {
+        if (payment.collected_by !== "BPP" || payment.status != "NOT-PAID") {
           addError(
             result,
             20006,
-            `Invalid response: payment.status must be 'NOT_PAID' when payment.type is 'ON-FULFILLMENT' in /${constants.CONFIRM}`
+            `Invalid response:  payment.collected_by must be "BPP" and payment.status must be "NOT-PAID" if payment.status is "ON-FULFILLMENT" in /${constants.CONFIRM}`
           );
-        }
-        if (
-          !payment.uri ||
-          !/^https?:\/\/[^\s/$.?#].[^\s]*$/.test(payment.uri)
-        ) {
-          addError(
-            result,
-            20006,
-            `Invalid response: payment.uri must be a valid URL in /${constants.CONFIRM}`
-          );
-        }
-        if (!payment.tl_method || payment.tl_method !== "http/get") {
-          addError(
-            result,
-            20006,
-            `Invalid response: payment.tl_method must be 'http/get' when collected_by is 'BAP' in /${constants.CONFIRM}`
-          );
-        }
-        if (payment.params) {
-          if (
-            !payment.params.currency ||
-            !/^[A-Z]{3}$/.test(payment.params.currency)
-          ) {
-            addError(
-              result,
-              20006,
-              `Invalid response: payment.params.currency must be a valid ISO 4217 code in /${constants.CONFIRM}`
-            );
-          }
-          if (
-            !payment.params.transaction_id ||
-            typeof payment.params.transaction_id !== "string" ||
-            payment.params.transaction_id === ""
-          ) {
-            addError(
-              result,
-              20006,
-              `Invalid response: payment.params.transaction_id must be a non-empty string in /${constants.CONFIRM}`
-            );
-          }
         }
       }
     }

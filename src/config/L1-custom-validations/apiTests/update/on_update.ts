@@ -7,7 +7,6 @@ import {
   timeDiff,
   isPresentInRedisSet,
   setRedisValue,
-  addActionToRedisSet,
 } from "../../utils//helper";
 import {
   partcancel_return_reasonCodes,
@@ -525,6 +524,7 @@ export const checkOnUpdate = async (
         });
       }
       quoteTrailSum = Math.abs(quoteTrailSum);
+      console.log('quoteTrailSum423442', quoteTrailSum);
       if (quoteTrailSum !== 0) {
         await RedisService.setKey(
           `${transaction_id}_quoteTrailSum`,
@@ -631,7 +631,11 @@ export const checkOnUpdate = async (
       const isReplaceable = await RedisService.getKey(
         `${data.context.transaction_id}_replaceable`
       );
-      if (isReplaceable) {
+      if (
+        isReplaceable &&
+        (apiSeq === ApiSequence.ON_UPDATE_PICKED ||
+          apiSeq === ApiSequence.ON_UPDATE_DELIVERED)
+      ) {
         on_update.fulfillments.forEach(async (ff: any) => {
           if (ff.type === "Return") {
             // Check for replace_request tag
@@ -912,7 +916,12 @@ export const checkOnUpdate = async (
                 const deliveryObj = on_update.fulfillments.find((ff: any) => {
                   return ff.type == "Delivery" && ff.id === replaceId;
                 });
-
+                await RedisService.setKey(
+                  `${transaction_id}_deliveryObjReplacement`,
+                  JSON.stringify(deliveryObj),
+                  TTL_IN_SECONDS
+                );
+                // delivery Obj check
                 if (deliveryObj) {
                   const [buyerGpsRaw, buyerAddrRaw] = await Promise.all([
                     getRedisValue(context.transaction_id, "buyerGps"),
