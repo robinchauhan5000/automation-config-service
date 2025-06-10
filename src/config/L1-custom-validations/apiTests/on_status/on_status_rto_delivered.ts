@@ -162,7 +162,6 @@ async function validateOrder(
   try {
     let cnfrmOrdrId =
       (await RedisService.getKey(`${transaction_id}_cnfrmOrdrId`)) || "";
-    cnfrmOrdrId = JSON.parse(cnfrmOrdrId);
     if (cnfrmOrdrId && order.id !== cnfrmOrdrId) {
       result.push(
         addError(
@@ -231,7 +230,7 @@ async function validateOrder(
                 storedCred.descriptor?.short_desc === descriptor.short_desc
               );
       
-              if (!isMatchFound) {
+              if (storedCreds.length > 0 && !isMatchFound ) {
                 addError(
             
                     `Order validation failure: Credential (id + descriptor) in /${constants.ON_CONFIRM} does not match /${constants.ON_SEARCH}`,

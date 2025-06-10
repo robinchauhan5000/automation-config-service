@@ -81,7 +81,7 @@ export async function performL1CustomValidations(
         {
           valid: false,
           code: 403,
-          description: "Not a valid action call", // description is optional
+          description: "Not a valid action call",
         },
       ];
 
