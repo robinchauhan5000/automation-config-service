@@ -79,7 +79,7 @@ flows:
         description: BAP select the item
         input:
           - name: fashion_select
-            type: ret12_fashion_select
+            type: ret10_grocery_select
       - key: on_select
         type: on_select
         unsolicited: false
@@ -274,7 +274,7 @@ flows:
         description: BAP select the item
         input:
           - name: fashion_select
-            type: ret12_fashion_select
+            type: ret10_grocery_select
       - key: on_select
         type: on_select
         unsolicited: false
@@ -350,7 +350,7 @@ flows:
         description: BAP select the item
         input:
           - name: fashion_select
-            type: ret12_fashion_select
+            type: ret10_grocery_select
       - key: on_select
         type: on_select
         unsolicited: false
@@ -449,7 +449,7 @@ flows:
         description: BAP select the item
         input:
           - name: fashion_select
-            type: ret12_fashion_select
+            type: ret10_grocery_select
       - key: on_select
         type: on_select
         unsolicited: false
@@ -583,7 +583,7 @@ flows:
         description: BAP select the item
         input:
           - name: fashion_select
-            type: ret12_fashion_select
+            type: ret10_grocery_select
       - key: on_select
         type: on_select
         unsolicited: false
