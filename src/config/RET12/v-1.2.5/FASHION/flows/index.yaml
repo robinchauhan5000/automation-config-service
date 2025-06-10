@@ -494,13 +494,20 @@ flows:
         owner: BPP
         expect: false
         description: Part cancellation request
-      - key: update_settlement_trail
+      - key: update_partial_cancel_settlement
         type: update
         unsolicited: false
         pair: null
         owner: BAP
         expect: false
         description: settlement trail update
+      - key: on_status_pending
+        type: on_status
+        unsolicited: true
+        pair: null
+        owner: BPP
+        expect: false
+        description: Status updates - order accepted
       - key: on_status_packed
         type: on_status
         unsolicited: true
@@ -529,14 +536,14 @@ flows:
         owner: BPP
         expect: false
         description: Status updates - order delivered
-      - key: update_return
+      - key: update_reverse_qc
         type: update
         unsolicited: false
-        pair: on_update_return_init
+        pair: on_update_interim_reverseQc
         owner: BAP
         expect: false
         description: Buyer updates product
-      - key: on_update_return_init
+      - key: on_update_interim_reverseQc
         type: on_update
         unsolicited: false
         pair: null
@@ -557,7 +564,7 @@ flows:
         owner: BPP
         expect: false
         description: Update request picked
-      - key: update_settlement_trail
+      - key: update_reverse_qc_settlement
         type: update
         unsolicited: false
         pair: null
@@ -642,20 +649,6 @@ flows:
         owner: BPP
         expect: false
         description: Status updates - order picked up
-      - key: track
-        type: track
-        unsolicited: false
-        pair: on_track
-        owner: BAP
-        expect: false
-        description: BAP request to track the order
-      - key: on_track
-        type: on_track
-        unsolicited: false
-        pair: null
-        owner: BPP
-        expect: false
-        description: BPP sends the tracking information
       - key: on_status_out_for_delivery
         type: on_status
         unsolicited: true
