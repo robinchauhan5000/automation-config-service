@@ -719,6 +719,7 @@ const validateTags = async (
   result: ValidationError[]
 ): Promise<void> => {
   try {
+    console.log("🚀 ~ tags:", JSON.stringify(tags, null, 2));
     if (tags?.length) {
       const bppTermsTag = tags.find((tag: any) => tag.code === "bpp_terms");
       if (bppTermsTag) {
@@ -744,9 +745,6 @@ const validateTags = async (
 
         let tax_number: any = {};
         let provider_tax_number: any = {};
-        const np_type_on_search = await getRedisValue(
-          `${txnId}_${ApiSequence.ON_SEARCH}np_type`
-        );
 
         tagsList.forEach((e: any) => {
           if (e.code === "tax_number") {
@@ -811,36 +809,12 @@ const validateTags = async (
             `Invalid response: provider_tax_number must be present in /${constants.CONFIRM}`
           );
         }
-
-        if (
-          tax_number.value?.length === 15 &&
-          provider_tax_number?.value?.length === 10 &&
-          np_type_on_search
-        ) {
-          const pan_id = tax_number.value.slice(2, 12);
-          if (
-            pan_id !== provider_tax_number.value &&
-            np_type_on_search === "ISN"
-          ) {
-            addError(
-              result,
-              20006,
-              `Invalid response: Pan_id is different in tax_number and provider_tax_number in /${constants.CONFIRM}`
-            );
-          } else if (
-            pan_id === provider_tax_number.value &&
-            np_type_on_search === "MSN"
-          ) {
-            addError(
-              result,
-              20006,
-              `Invalid response: Pan_id shouldn't be same in tax_number and provider_tax_number in /${constants.CONFIRM}`
-            );
-          }
-        }
+        
       }
 
       const bapTermsTag = tags.find((tag: any) => tag.code === "bap_terms");
+      console.log("🚀 ~ bapTermsTag:", JSON.stringify(bapTermsTag))
+      
       if (bapTermsTag) {
         if (!isTagsValid(tags, "bap_terms")) {
           addError(
@@ -881,6 +855,9 @@ const validateTags = async (
       }
 
       const onInitTags = await getRedisValue(`${txnId}_on_init_tags`);
+      console.log(
+      JSON.stringify(onInitTags, null, 2)
+    )
       if (onInitTags && bppTermsTag) {
         const initBppTerms = onInitTags.find(
           (tag: any) => tag.code === "bpp_terms"
@@ -908,6 +885,7 @@ const validateTags = async (
       }
     }
   } catch (err: any) {
+
     addError(
       result,
       30019,
