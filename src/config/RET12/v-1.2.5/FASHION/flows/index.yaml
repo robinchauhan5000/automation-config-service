@@ -473,15 +473,15 @@ flows:
         owner: BPP
         expect: false
         description: Respond to init
-      - key: confirm
-        type: confirm_seller_cred
+      - key: confirm_seller_cred
+        type: confirm
         unsolicited: false
         pair: on_confirm
         owner: BAP
         expect: false
         description: Buyer confirms product
-      - key: on_confirm
-        type: on_confirm__seller_cred
+      - key: on_confirm_seller_cred
+        type: on_confirm
         unsolicited: false
         pair: null
         owner: BPP
