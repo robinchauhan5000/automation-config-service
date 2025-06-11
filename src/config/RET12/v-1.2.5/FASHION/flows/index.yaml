@@ -158,7 +158,7 @@ flows:
         pair: null
         owner: BPP
         expect: false
-        description: Status updates - order delivered
+        description: Status updates - order delivered 
   - id: Out_Of_Stock_Flow
     description: Retail 1.2.5 (Out Of Stock)
     sequence:
@@ -437,6 +437,56 @@ flows:
         owner: BPP
         expect: false
         description: Status updates - rto order delivered
+  - id: Seller_Cred_Flow
+    description: Retail 1.2.5 (Delivery)
+    sequence: &base_line_flow
+      - key: select
+        type: select
+        unsolicited: false
+        pair: on_select
+        owner: BAP
+        expect: true
+        description: BAP select the item
+        input:
+          - name: fashion_select
+            type: ret10_grocery_select
+      - key: on_select
+        type: on_select
+        unsolicited: false
+        pair: null
+        owner: BPP
+        expect: false
+        description:
+          BPP returns item breakup when item is in stock and offer applied
+          (if any)
+      - key: init
+        type: init
+        unsolicited: false
+        pair: on_init
+        owner: BAP
+        expect: false
+        description: Buyer initiate the product and send the updated fulfillment id
+      - key: on_init
+        type: on_init
+        unsolicited: false
+        pair: null
+        owner: BPP
+        expect: false
+        description: Respond to init
+      - key: confirm
+        type: confirm_seller_cred
+        unsolicited: false
+        pair: on_confirm
+        owner: BAP
+        expect: false
+        description: Buyer confirms product
+      - key: on_confirm
+        type: on_confirm__seller_cred
+        unsolicited: false
+        pair: null
+        owner: BPP
+        expect: false
+        description: Seller Accepts confirmation
   - id: Part_Cancellation_And_Return_Flow
     description: Retail 1.2.5 (Part Cancellation and Return)
     sequence:
