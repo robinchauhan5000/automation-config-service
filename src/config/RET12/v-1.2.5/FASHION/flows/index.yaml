@@ -480,7 +480,7 @@ flows:
         owner: BAP
         expect: false
         description: Buyer confirms product
-      - key: on_confirm__seller_cred
+      - key: on_confirm_seller_cred
         type: on_confirm
         unsolicited: false
         pair: null
