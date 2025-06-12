@@ -970,10 +970,19 @@ flows:
       - key: cancel_return_request
         type: cancel
         unsolicited: false
-        pair: on_cancel
+        pair: on_cancel_return_request
         owner: BAP
         expect: false
         description: Cancel return request
+        input:
+          - name: Cancellation Return Reason Id
+            label: Select a reason_id
+            type: select
+            values:
+              - "001"
+              - "002"
+              - "003"
+            default: "001"
       - key: on_cancel_return_request
         type: on_cancel
         unsolicited: false
