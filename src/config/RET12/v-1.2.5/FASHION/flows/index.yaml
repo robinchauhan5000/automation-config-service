@@ -388,6 +388,20 @@ flows:
         owner: BPP
         expect: false
         description: Seller Accepts confirmation
+      - key: on_update_part_cancel
+        type: on_update
+        unsolicited: true
+        pair: null
+        owner: BPP
+        expect: false
+        description: Part cancellation request
+      - key: update_partial_cancel_settlement
+        type: update
+        unsolicited: false
+        pair: null
+        owner: BAP
+        expect: false
+        description: settlement trail update
       - key: on_status_pending
         type: on_status
         unsolicited: true
@@ -487,7 +501,7 @@ flows:
         owner: BPP
         expect: false
         description: Seller Accepts confirmation
-  - id: Part_Cancellation_And_Return_Flow
+  - id: Return_Flow
     description: Retail 1.2.5 (Part Cancellation and Return)
     sequence:
       - key: select
@@ -537,20 +551,6 @@ flows:
         owner: BPP
         expect: false
         description: Seller Accepts confirmation
-      - key: on_update_part_cancel
-        type: on_update
-        unsolicited: true
-        pair: null
-        owner: BPP
-        expect: false
-        description: Part cancellation request
-      - key: update_partial_cancel_settlement
-        type: update
-        unsolicited: false
-        pair: null
-        owner: BAP
-        expect: false
-        description: settlement trail update
       - key: on_status_pending
         type: on_status
         unsolicited: true
