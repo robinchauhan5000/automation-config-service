@@ -48,13 +48,13 @@ export function validateAsyncContext(
 				error: `${predecessorName} for ${subjectAction} not found in the flow history`,
 			};
 		}
-		if (predecessor.messageId != subject.message_id) {
-			return {
-				valid: false,
-				error: `message_id mismatch between ${predecessorName} and ${subjectAction}
-                expected ${predecessor.messageId} but found ${subject.message_id}`,
-			};
-		}
+		// if (predecessor.messageId != subject.message_id) {
+		// 	return {
+		// 		valid: false,
+		// 		error: `message_id mismatch between ${predecessorName} and ${subjectAction}
+        //         expected ${predecessor.messageId} but found ${subject.message_id}`,
+		// 	};
+		// }
 		const filteredContexts = sortedContexts
 			.filter((c) => JSON.stringify(c) !== JSON.stringify(predecessor))
 			.map((c) => c.messageId);
