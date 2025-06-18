@@ -18,16 +18,14 @@ flows:
             label: Features supported
             type: checkbox
             options:
-              - code: "006"
-                name: "Return with pickup"
-              - code: "00B"
-                name: "Replacement flow"
-              - code: "012"
-                name: "Cash on delivery (COD) order"
-              - code: "017"
-                name: "Seller Creds"
-              - code: "01D"
-                name: "Option for multi-fulfillment order"
+              - code: "007"
+                name: "SNP collecting payment"
+              - code: "00C"
+                name: "Exchange flow"
+              - code: "0099"
+                name: "Purchase finance"
+              - code: "016"
+                name: "Customization of input type text"
       - key: on_search
         type: on_search
         unsolicited: false
