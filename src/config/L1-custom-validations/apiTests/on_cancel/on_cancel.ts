@@ -469,6 +469,9 @@ export const onCancel = async (
         onCancelItems.forEach((item: any) => {
           onCancelItemCount += item.quantity.count / 1;
         });
+
+        console.log('Select Items: ', JSON.stringify(select_items), 'count: ', onSelectItemCount);
+        console.log('onCancelItems Items: ', JSON.stringify(onCancelItems), 'count: ', onCancelItemCount);
         if (onSelectItemCount !== onCancelItemCount) {
           results.push({
             valid: false,
