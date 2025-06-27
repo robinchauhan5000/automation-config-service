@@ -32,9 +32,11 @@ export function filterDomainData(
 
 export const getFileFromRefrence = async (filePath: string) => {
   try {
+    console.log("filePath", filePath)
     const config = await loadYAMLWithRefs(
       path.join(__dirname, "../config", filePath)
     );
+    console.log("config", filePath, config);
     return config;
   } catch (e) {
     console.error("error while fetching file", e);
