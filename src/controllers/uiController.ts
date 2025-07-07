@@ -13,6 +13,7 @@ export const getFlows = async (req: Request, res: Response) => {
       query.usecase as string,
       "flows"
     );
+    console.log("filePath", filePath)
     const data = await getFileFromRefrence(filePath);
 
     res.send({ data: data });
